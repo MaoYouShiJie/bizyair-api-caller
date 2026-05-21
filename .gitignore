@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.thumbcache/
+.playwright-mcp/
+history.json
+config.json
+输出/
+测试/

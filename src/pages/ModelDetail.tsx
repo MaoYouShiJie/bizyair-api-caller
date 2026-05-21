@@ -1,0 +1,1007 @@
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { fetchModelDetail, fetchModelPrice, createTask, pollTask } from '../api/modelzoo';
+import { saveOutputs, getSavePath } from '../api/saveOutput';
+import { loadHistory, saveHistory, deleteHistory, type HistoryRecord } from '../api/history';
+import MediaViewer from '../components/MediaViewer';
+import type { ModelDetail, InputParam, ModelPrice } from '../types';
+
+function isUrl(v: string) { return /^https?:\/\//i.test(v); }
+
+function jsonForDisplay(taskResponse: Record<string, unknown> | null, outputs: Record<string, string[]> | null, example: Record<string, string[]> | null) {
+  if (taskResponse) return taskResponse;
+  const out = outputs || example;
+  if (!out) return {};
+  return { request_id: '', status: 'Success', message: null, outputs: out };
+}
+
+function mdToHtml(text: string) {
+  const lines = text.split('\n');
+  let html = '';
+  let inList = false;
+  for (const raw of lines) {
+    let line = raw
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    if (/^###\s+(.*)/.test(line)) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${line.replace(/^###\s+/, '')}</h3>`;
+    } else if (/^[\d]+\.\s+(.*)/.test(line)) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${line.replace(/^[\d]+\.\s+/, '')}</li>`;
+    } else if (/^\*\*\*/.test(line)) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += '<hr>';
+    } else if (raw.trim() === '') {
+      if (inList) { html += '</ul>'; inList = false; }
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<p>${line}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+const zhCategory: Record<string, string> = {
+  'Text to Image': '文生图', 'Image to Image': '图生图',
+  'Text to Video': '文生视频', 'Image to Video': '图生视频',
+  'Reference to Video': '参考生视频', 'Video Edit': '视频编辑',
+  'Video Extend': '视频延长', 'Text to Speech': '语音合成',
+  'Large Language Models': '大语言模型', 'Vision': '视觉',
+  'FLF to Video': '首尾帧生视频',
+};
+
+function InputRenderer({ param, value, onChange }: {
+  param: InputParam;
+  value: unknown;
+  onChange: (val: unknown) => void;
+}) {
+  const ft = param.field_type;
+
+  if (ft === 'boolean') {
+    return (
+      <label className="field-boolean">
+        <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} />
+        {param.field_label}
+      </label>
+    );
+  }
+
+  if (ft === 'seed') {
+    const min = (param.field_options?.min as number) ?? 0;
+    const max = (param.field_options?.max as number) ?? 2147483647;
+    const step = (param.field_options?.step as number) ?? 1;
+    if (max - min <= 100) {
+      return (
+        <div className="field-slider-wrap">
+          <input type="range" className="field-slider" min={min} max={max} step={step}
+            value={value as number ?? min} onChange={e => onChange(Number(e.target.value))} />
+          <input type="number" className="field-slider-val field-slider-input" min={min} max={max} step={step}
+            value={value as number ?? min} onChange={e => {
+              const v = Number(e.target.value);
+              if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
+            }} />
+        </div>
+      );
+    }
+    const nv = Number(value);
+    return (
+      <div className="field-seed-wrap">
+        <div className="field-seed-input-wrap">
+          <input type="text" className="field-input field-seed-input"
+            value={value as number ?? ''} onChange={e => {
+              const v = e.target.value.replace(/[^0-9-]/g, '');
+              onChange(v === '' || v === '-' ? v : Number(v));
+            }} placeholder="-1" title={`范围 0-${max}；-1 表示由系统自动生成`} />
+          <div className="field-seed-btns">
+            <button className="field-seed-btn" title="+1" onClick={() => onChange((nv || 0) + 1)}>
+              <svg width="10" height="10" viewBox="0 0 10 6" fill="currentColor"><path d="M0 5l5-5 5 5z"/></svg>
+            </button>
+            <button className="field-seed-btn" title="-1" onClick={() => onChange(Math.max(-1, (nv || 0) - 1))}>
+              <svg width="10" height="10" viewBox="0 0 10 6" fill="currentColor"><path d="M0 1l5 5 5-5z"/></svg>
+            </button>
+          </div>
+        </div>
+        <button className="field-seed-random" title="自动随机" onClick={() => onChange(Math.floor(Math.random() * max))}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16"/>
+          </svg>
+        </button>
+        <p className="field-seed-hint">范围 0-{max}；-1 表示由系统自动生成</p>
+      </div>
+    );
+  }
+
+  if (ft === 'combo' && param.field_options?.values) {
+    return (
+      <select
+        className="field-select"
+        value={value as string ?? ''}
+        onChange={e => onChange(e.target.value)}
+      >
+        {(param.field_options.values as string[]).map(v => (
+          <option key={v} value={v}>{v}</option>
+        ))}
+      </select>
+    );
+  }
+
+  if (ft === 'customtext') {
+    const taRef = useRef<HTMLTextAreaElement>(null);
+    useEffect(() => {
+      const el = taRef.current;
+      if (el) {
+        el.style.height = 'auto';
+        const lh = parseInt(window.getComputedStyle(el).lineHeight) || 20;
+        el.style.height = (el.scrollHeight + lh * 2) + 'px';
+      }
+    }, [value]);
+    return (
+      <textarea
+        ref={taRef}
+        className="field-textarea"
+        value={value as string ?? ''}
+        onChange={e => onChange(e.target.value)}
+        placeholder={(param.field_options?.placeholder as string) || ''}
+        maxLength={(param.field_options?.max_length as number) || undefined}
+        rows={4}
+      />
+    );
+  }
+
+  if (ft === 'slider') {
+    const min = (param.field_options?.min as number) ?? 0;
+    const max = (param.field_options?.max as number) ?? 100;
+    const step = (param.field_options?.step as number) ?? 1;
+    return (
+      <div className="field-slider-wrap">
+        <input type="range" className="field-slider" min={min} max={max} step={step}
+          value={Number(value ?? min)} onChange={e => onChange(Number(e.target.value))} />
+        <input type="number" className="field-slider-val field-slider-input" min={min} max={max} step={step}
+          value={Number(value ?? min)} onChange={e => {
+            const v = Number(e.target.value);
+            if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
+          }} />
+      </div>
+    );
+  }
+
+  if (ft === 'images' || ft === 'videos') {
+    const files = Array.isArray(value) ? (value as string[]) : [];
+    const isImage = ft === 'images';
+    const exts = (param.field_options?.supported_exts as string[]) || [];
+    const maxSize = (param.field_options?.supported_max_file_size as number) || 0;
+    const acceptExts = exts.map(e => e.startsWith('.') ? e : `.${e}`).join(',');
+    const [dragOver, setDragOver] = useState<number | null>(null);
+    const [loading, setLoading] = useState(false);
+
+    const readFile = (file: File, cb: (url: string) => void) => {
+      if (maxSize && file.size > maxSize) {
+        alert(`文件大小超过限制 (${(maxSize / 1024 / 1024).toFixed(0)}MB)`);
+        return;
+      }
+      setLoading(true);
+      const reader = new FileReader();
+      reader.onload = (e) => { cb(e.target?.result as string); setLoading(false); };
+      reader.readAsDataURL(file);
+    };
+
+    const addFile = (file: File) => {
+      readFile(file, (dataUrl) => onChange([...files, dataUrl]));
+    };
+
+    const replaceFile = (index: number, file: File) => {
+      readFile(file, (dataUrl) => {
+        const next = [...files];
+        next[index] = dataUrl;
+        onChange(next);
+      });
+    };
+
+    const removeFile = (index: number, e: React.MouseEvent) => {
+      e.stopPropagation();
+      const next = files.filter((_, i) => i !== index);
+      onChange(next);
+    };
+
+    const openPicker = (index?: number) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = acceptExts || (isImage ? 'image/*' : 'video/*');
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      input.onchange = () => {
+        const file = input.files?.[0];
+        if (file) {
+          if (index !== undefined) replaceFile(index, file);
+          else addFile(file);
+        }
+        document.body.removeChild(input);
+      };
+      input.click();
+    };
+
+    const renderSlot = (slotIndex: number, content: React.ReactNode, key?: number | string) => (
+      <div key={key}
+        className={`mu-slot ${dragOver === slotIndex ? 'mu-dragover' : ''} ${loading ? 'mu-loading' : ''}`}
+        onDragEnter={e => { e.preventDefault(); setDragOver(slotIndex); }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(null); }}
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); }}
+        onDrop={e => {
+          e.preventDefault(); e.stopPropagation(); setDragOver(null);
+          const file = e.dataTransfer.files[0];
+          if (file) {
+            const idx = slotIndex < files.length ? slotIndex : undefined;
+            idx !== undefined ? replaceFile(idx, file) : addFile(file);
+          }
+        }}
+      >
+        {content}
+        {loading && <div className="mu-loading-overlay"><div className="mu-spinner" /></div>}
+      </div>
+    );
+
+    return (
+      <div className="field-media">
+        <div className="mu-slots">
+          {files.map((url, i) => renderSlot(i,
+            <div className="mu-preview group" onClick={() => openPicker(i)}>
+              {isImage ? (
+                <img src={url} alt="" />
+              ) : (
+                <video src={url} controls />
+              )}
+              <div className="mu-overlay"><span>点击替换</span></div>
+              <button className="mu-clear" onClick={(e) => removeFile(i, e)}>×</button>
+            </div>, i
+          ))}
+          {renderSlot(files.length,
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="12" y1="5" x2="12" y2="19"/>
+              <line x1="5" y1="12" x2="19" y2="12"/>
+            </svg>, 'add'
+          )}
+        </div>
+        <p className="field-hint">
+          支持格式: {exts.join(', ')}{maxSize > 0 && `，最大 ${(maxSize / 1024 / 1024).toFixed(0)}MB`}
+        </p>
+      </div>
+    );
+  }
+
+  const optsMin = param.field_options?.min as number | undefined;
+  const optsMax = param.field_options?.max as number | undefined;
+  if (optsMin !== undefined && optsMax !== undefined && optsMax - optsMin <= 100) {
+    const step = (param.field_options?.step as number) ?? 1;
+    return (
+      <div className="field-slider-wrap">
+        <input type="range" className="field-slider" min={optsMin} max={optsMax} step={step}
+          value={Number(value ?? optsMin)} onChange={e => onChange(Number(e.target.value))} />
+        <input type="number" className="field-slider-val field-slider-input" min={optsMin} max={optsMax} step={step}
+          value={Number(value ?? optsMin)} onChange={e => {
+            const v = Number(e.target.value);
+            if (!isNaN(v)) onChange(Math.min(optsMax, Math.max(optsMin, v)));
+          }} />
+      </div>
+    );
+  }
+  return (
+    <input
+      type="text"
+      className="field-input"
+      value={value as string ?? ''}
+      onChange={e => onChange(e.target.value)}
+    />
+  );
+}
+
+export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: { onOpenSettings?: () => void; onOpenAssetLibrary?: () => void }) {
+  const { modelName, endpointSuffix } = useParams();
+  const endpoint = `${modelName}/${endpointSuffix}`;
+
+  const [detail, setDetail] = useState<ModelDetail | null>(null);
+  const [formValues, setFormValues] = useState<Record<string, unknown>>({});
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+const [taskId, setTaskId] = useState<string | null>(null);
+  const [error, setError] = useState<string | { message: string; detail?: string; logs?: string } | null>(null);
+  const [outputs, setOutputs] = useState<Record<string, string[]> | null>(null);
+  const [taskStatus, setTaskStatus] = useState<string>('');
+  const [modelPrice, setModelPrice] = useState<ModelPrice | null>(null);
+  const [defaultValues, setDefaultValues] = useState<Record<string, unknown> | null>(null);
+  const [activeTab, setActiveTab] = useState('invoke');
+  const [outputViewMode, setOutputViewMode] = useState<'preview' | 'json'>('preview');
+  const [saveStatus, setSaveStatus] = useState('');
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
+  const [taskResponse, setTaskResponse] = useState<Record<string, unknown> | null>(null);
+  const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
+  const [viewerItems, setViewerItems] = useState<{ url: string; name?: string }[]>([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
+  const [resultTab, setResultTab] = useState<'output' | 'history'>('output');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [expandedTexts, setExpandedTexts] = useState<Record<string, boolean>>({});
+  const [historyModal, setHistoryModal] = useState<{ url: string; prompt: string; rec: HistoryRecord; index: number; list: { url: string; prompt: string; rec: HistoryRecord }[] } | null>(null);
+
+  const toggleText = (key: string) => {
+    setExpandedTexts(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  function groupByDate(records: HistoryRecord[]): Record<string, HistoryRecord[]> {
+    const groups: Record<string, HistoryRecord[]> = {};
+    for (const r of records) {
+      const d = r.timestamp.split('T')[0];
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(r);
+    }
+    return Object.fromEntries(Object.entries(groups).sort(([a], [b]) => b.localeCompare(a)));
+  }
+
+  const switchTab = (tab: string) => {
+    setActiveTab(tab);
+    if (tab === 'price') setSearchParams({ tab: 'price' });
+    else if (tab === 'history') setSearchParams({ tab: 'history' });
+    else setSearchParams({});
+    if (tab === 'history' && endpoint) {
+      setHistoryLoading(true);
+      loadHistory(endpoint).then(r => setHistoryRecords(r)).catch(() => {}).finally(() => setHistoryLoading(false));
+    }
+  };
+
+  useEffect(() => {
+    if (!endpoint) return;
+    setLoading(true);
+    setError(null);
+    fetchModelDetail(endpoint)
+      .then(data => {
+        setDetail(data);
+        const dv: Record<string, unknown> = {};
+        data.input_params?.forEach(p => {
+          if (p.field_value !== undefined && p.field_value !== null) {
+            dv[p.field_name] = p.field_value;
+          }
+        });
+        setFormValues(dv);
+        setDefaultValues(dv);
+        return fetchModelPrice(endpoint);
+      })
+      .then(pd => {
+        if (pd) setModelPrice(pd);
+      })
+      .catch(e => {
+        setError('加载模型详情失败: ' + e.message);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [endpoint]);
+
+  const handleSubmit = useCallback(async () => {
+    if (!detail) return;
+    if (!localStorage.getItem('bizyair_api_key')) {
+      setApiKeyMissing(true);
+      return;
+    }
+
+    setSubmitting(true);
+    setError('');
+    setOutputs(null);
+    setTaskId(null);
+    setTaskStatus('提交中...');
+
+    try {
+      const result = await createTask(detail.endpoint, formValues);
+      const tid = result.request_id;
+      setTaskId(tid);
+      setTaskStatus('排队中...');
+
+      const poll = async () => {
+        const statuses = ['Queuing', 'Preparing', 'Running'];
+        while (true) {
+          await new Promise(r => setTimeout(r, 2000));
+          const data = await pollTask(tid);
+          setTaskStatus(data.status);
+
+          if (data.status === 'Success') {
+            setOutputs(data.outputs || null);
+            setTaskResponse(data as Record<string, unknown>);
+            saveHistory(endpoint, formValues, data.outputs || {}, tid).catch(() => {});
+            if (data.outputs) {
+              setSaveStatus('正在保存...');
+              saveOutputs(data.outputs, detail.display_name).then(n => {
+                setSaveStatus(n > 0 ? `已保存 ${n} 个文件` : '');
+              }).catch(() => { setSaveStatus('保存失败'); });
+            }
+            break;
+          }
+          if (data.status === 'Failed') {
+            setError({
+              message: data.message || data.error_msg || '任务执行失败',
+              detail: data.error_detail,
+              logs: data.logs
+            });
+            break;
+          }
+          if (data.status === 'Canceled') {
+            setError('任务已取消');
+            break;
+          }
+          if (!statuses.includes(data.status)) break;
+        }
+      };
+      poll();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : '调用失败');
+    } finally {
+      setSubmitting(false);
+    }
+  }, [detail, formValues]);
+
+  const updateValue = (name: string, val: unknown) => {
+    setFormValues(prev => ({ ...prev, [name]: val }));
+  };
+
+  if (loading) {
+    return (
+      <div className="loading">
+        <div className="spinner" />
+        <p>加载模型详情...</p>
+      </div>
+    );
+  }
+
+  if (error && !detail) {
+    return <div className="error-message">{error}</div>;
+  }
+
+  if (!detail) return null;
+
+  return (
+    <div className="model-detail">
+      <button className="btn btn-ghost api-key-btn" onClick={onOpenSettings}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" />
+        </svg>
+        {localStorage.getItem('bizyair_api_key') ? '已配置' : 'API设置'}
+      </button>
+      <button className="btn btn-ghost settings-btn" onClick={onOpenAssetLibrary}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
+        </svg>
+        资产库
+      </button>
+      <div className="detail-header">
+        <Link to="/" className="back-link">← 返回模型列表</Link>
+        <div className="detail-title-row">
+          <h1>{detail.display_name}</h1>
+          <div className="detail-tags-inline">
+            <span className="tag">{detail.manufacturer}</span>
+            <span className="tag">{zhCategory[detail.category] || detail.category}</span>
+            {detail.tags.map(t => <span key={t} className="tag">{t}</span>)}
+          </div>
+          {(() => {
+            const forms = detail.related_categories.length > 0
+              ? detail.related_categories
+              : [{ id: detail.id, category: detail.category, endpoint: detail.endpoint }];
+            const sorted = [...forms].sort((a, b) =>
+              (zhCategory[a.category] || a.category).localeCompare(zhCategory[b.category] || b.category)
+            );
+            return (
+              <select
+                className="form-switcher"
+                value={detail.endpoint}
+                onChange={e => { window.location.href = `/model/${e.target.value}`; }}
+              >
+                {sorted.map(f => (
+                  <option key={f.endpoint} value={f.endpoint}>{zhCategory[f.category] || f.category}</option>
+                ))}
+              </select>
+            );
+          })()}
+        </div>
+        <p className="detail-desc">{detail.description}</p>
+        <div className="detail-tabs">
+          <button className={`dt-tab ${activeTab === 'invoke' ? 'active' : ''}`} onClick={() => switchTab('invoke')}>调用</button>
+          <button className={`dt-tab ${activeTab === 'price' ? 'active' : ''}`} onClick={() => switchTab('price')}>价格</button>
+        </div>
+      </div>
+
+      {activeTab === 'price' ? (
+        <div className="price-page">
+          {modelPrice?.price_table && (
+            <div className="price-page-section">
+              <h3>价格表</h3>
+              {modelPrice.price_table.cells?.length ? (
+                <table className="price-table">
+                  <thead>
+                    <tr>
+                      {modelPrice.price_table.columns.map(col => (
+                        <th key={col.variable_name}>{col.field_label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {modelPrice.price_table.cells.map((row, ri) => (
+                      <tr key={ri}>
+                        {row.map((cell, ci) => {
+                          if (cell.variable_name === 'price') {
+                            return <td key={ci}>🟡 {cell.value_str}/{cell.unit_name || '次'}</td>;
+                          }
+                          return <td key={ci}>{cell.value_str}</td>;
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : modelPrice.price_table.simple_price_text ? (
+                <p className="price-simple-text">{modelPrice.price_table.simple_price_text}</p>
+              ) : null}
+            </div>
+          )}
+          {modelPrice?.benefit && (
+            <div className="price-page-section">
+              <h3>权益</h3>
+              <p className="price-page-subtitle">(免费版套餐)</p>
+              <table className="price-table">
+                <tbody>
+                  <tr><td className="benefit-row-label">API并发数</td><td className="benefit-row-val">-</td></tr>
+                  <tr><td className="benefit-row-label">RPD</td><td className="benefit-row-val">{modelPrice.benefit.rpd}</td></tr>
+                  <tr><td className="benefit-row-label">RPH</td><td className="benefit-row-val">{modelPrice.benefit.rph}</td></tr>
+                  <tr><td className="benefit-row-label">RPM</td><td className="benefit-row-val">{modelPrice.benefit.rpm === -1 ? '∞' : modelPrice.benefit.rpm}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+          {!modelPrice && (
+            <div className="price-page-section">
+              <p className="text-muted">暂无价格信息</p>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="detail-content">
+        <div className="input-panel">
+          <h3>输入参数</h3>
+          <div className="input-fields">
+            {detail.input_params.map(param => (
+              <div key={param.field_name} className="field-group">
+                <label className="field-label">
+                  {param.field_label}
+                  {param.required && <span className="required">*</span>}
+                  {param.billing_dim && <span className="billing-tag">计费维度</span>}
+                </label>
+                {param.field_tooltip && <p className="field-tooltip">{param.field_tooltip}</p>}
+                <InputRenderer
+                  param={param}
+                  value={formValues[param.field_name]}
+                  onChange={val => updateValue(param.field_name, val)}
+                />
+              </div>
+            ))}
+          </div>
+
+          {(() => {
+            let priceNum: number | undefined;
+            let priceUnit = '';
+            const pt = modelPrice?.price_table;
+
+            // 1) Calculate from billing_dim params with price_rate (live update)
+            let hasBilling = false;
+            if (detail.input_params) {
+              let total = 0;
+              detail.input_params.forEach(p => {
+                if (p.billing_dim && p.field_options) {
+                  const rate = (p.field_options as any).price_rate ?? (p.field_options as any).unit_price ?? (p.field_options as any).cost_per_unit;
+                  if (rate) {
+                    hasBilling = true;
+                    total += (Number(formValues[p.field_name]) || 0) * Number(rate);
+                  }
+                }
+              });
+              if (hasBilling) { priceNum = total; priceUnit = detail.billing_unit === 'CALL' ? '次' : '秒'; }
+            }
+
+            // 2) Parse simple_price_text (e.g. "50金币/秒") with billing_dim field
+            if (!hasBilling && !priceNum && pt?.simple_price_text) {
+              const m = pt.simple_price_text.match(/^(\d+(?:\.\d+)?)/);
+              if (m) {
+                const unitRate = Number(m[1]);
+                let dimValue: number | undefined;
+                detail.input_params?.forEach(p => {
+                  if (!p.billing_dim) return;
+                  const fv = formValues[p.field_name];
+                  if (fv === null || fv === undefined) return;
+                  const n = Number(fv);
+                  if (!isNaN(n)) dimValue = n;
+                });
+                if (dimValue !== undefined) {
+                  priceNum = dimValue * unitRate;
+                  priceUnit = '';
+                } else {
+                  priceNum = unitRate;
+                  priceUnit = pt.simple_price_text.match(/\/秒/) ? '秒' : '次';
+                }
+              }
+            }
+
+            // 3) If no billing_dim rates, match form values to price_table rows
+            if (!hasBilling && !priceNum && pt?.cells?.length) {
+              // Build map: price_table variable_name → form value (only in-scope fields)
+              const varValues: Record<string, string> = {};
+              detail.input_params?.forEach(p => {
+                const v = formValues[p.field_name];
+                if (v !== null && v !== undefined) varValues[p.variable_name] = String(v);
+              });
+              const totalPx = Number(formValues.width) * Number(formValues.height);
+              let bestRow = 0, bestScore = -1;
+              for (let ri = 0; ri < pt.cells.length; ri++) {
+                let score = 0;
+                for (const cell of pt.cells[ri]) {
+                  if (cell.variable_name === 'price' || !cell.value_str) continue;
+                  const fv = varValues[cell.variable_name];
+                  if (fv === undefined) {
+                    // Column not in form — skip
+                    continue;
+                  }
+                  // Check if cell value is a pixel-range expression like ">2560*1440" or "<=1920*1080"
+                  const isRange = /[<>]/.test(cell.value_str) && /\d+\s*\*\s*\d+/.test(cell.value_str);
+                  if (isRange && totalPx > 0) {
+                    const parts = cell.value_str.split('且').map(s => s.trim());
+                    if (parts.every(p => {
+                      const m = p.match(/([<>]=?)\s*(\d+)\s*\*\s*(\d+)/);
+                      if (!m) return false;
+                      const op = m[1], threshold = Number(m[2]) * Number(m[3]);
+                      return op === '>' ? totalPx > threshold
+                           : op === '>=' ? totalPx >= threshold
+                           : op === '<' ? totalPx < threshold
+                           : op === '<=' ? totalPx <= threshold : false;
+                    })) score += 10;
+                  } else {
+                    // Direct string match against the corresponding form value
+                    if (cell.value_str.includes(fv) || fv.includes(cell.value_str)) {
+                      score += 10;
+                    }
+                  }
+                }
+                if (score > bestScore) { bestScore = score; bestRow = ri; }
+              }
+              const pc = pt.cells[bestRow].find(c => c.variable_name === 'price');
+              if (pc) { priceNum = Number(pc.value_str) || pc.amount; priceUnit = pc.unit_name || '次'; }
+            }
+
+            // 5) Fallback: detail billing_price
+            if (!priceNum) {
+              priceNum = detail.billing_price ?? detail.billing_price_total;
+              priceUnit = detail.billing_unit === 'CALL' ? '次' : '';
+            }
+
+            return (
+              <div className="btn-row">
+                <button className="btn btn-primary btn-submit" onClick={handleSubmit} disabled={submitting}>
+                  {submitting ? '调用中...' : (
+                    <span className="btn-label">
+                      运行
+                      {priceNum !== undefined && priceNum > 0 ? <span className="btn-price"> 🟡 {priceNum}{priceUnit ? `/${priceUnit}` : ''}</span> : pt?.simple_price_text ? <span className="btn-price"> 🟡 按量计费</span> : <span className="btn-price"> 🟡 ?</span>}
+                    </span>
+                  )}
+                </button>
+                <button className="btn btn-ghost btn-reset" onClick={() => defaultValues && setFormValues({ ...defaultValues })}>
+                  重置
+                </button>
+              </div>
+            );
+          })()}
+
+          {apiKeyMissing && (
+            <p className="error-text">请先在右上角「API设置」中配置 API Key</p>
+          )}
+        </div>
+
+        <div className="result-panel">
+          <div className="result-panel-tabs">
+            <button className={`rpt-tab ${resultTab === 'output' ? 'active' : ''}`} onClick={() => setResultTab('output')}>生成结果</button>
+            <button className={`rpt-tab ${resultTab === 'history' ? 'active' : ''}`} onClick={() => { setResultTab('history'); loadHistory(endpoint).then(r => setHistoryRecords(r)).catch(() => {}); }}>历史记录</button>
+          </div>
+
+          {resultTab === 'history' ? (
+            historyRecords.length === 0 ? (
+              <div className="result-placeholder"><p>暂无历史记录</p></div>
+            ) : selectedDate ? (
+              <div className="history-open-view">
+                <button className="al-hdr-back" onClick={() => setSelectedDate(null)}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+                  全部日期
+                </button>
+                <div className="al-file-grid">
+                  {(() => {
+                    const items = groupByDate(historyRecords)[selectedDate] || [];
+                    const allImages: { url: string; prompt: string; rec: HistoryRecord }[] = [];
+                    for (const rec of items) {
+                      const prompt = Object.entries(rec.formValues)
+                        .filter(([, v]) => !Array.isArray(v) && typeof v === 'string')
+                        .map(([, v]) => v).join(' | ');
+                      const urls = Object.values(rec.outputs).flat();
+                      for (const url of urls) {
+                        allImages.push({ url, prompt, rec });
+                      }
+                    }
+                    return allImages.map((img, i) => (
+                      <div key={i} className="al-thumb-wrap history-img-wrap" onClick={() => setHistoryModal({ ...img, index: i, list: allImages })}>
+                        <img src={img.url} alt="" className="al-thumb-img" loading="eager" />
+                        <div className="history-tooltip">{img.prompt || '无提示词'}</div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              </div>
+            ) : (
+              <div className="al-folder-grid">
+                {Object.entries(groupByDate(historyRecords)).map(([date, items]) => {
+                  const allCovers = items.flatMap(r => Object.values(r.outputs).flat()).filter(u => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov|avi|mkv)$/i.test(u));
+                  const covers = allCovers.slice(0, 3).reverse();
+                  return (
+                    <div key={date} className="al-folder-item">
+                      <div
+                        className="al-stacked-folder"
+                        onClick={() => setSelectedDate(date)}
+                      >
+                        {[0, 1, 2].map(i => {
+                          if (!covers[i]) return null;
+                          const edge = 4;
+                          const gap = 18;
+                          const isVideo = /\.(mp4|webm|mov|avi|mkv)$/i.test(covers[i]);
+                          return (
+                            <div key={i} className="al-stacked-layer" style={{ top: edge, left: edge + i * gap, right: edge + (2 - i) * gap, bottom: edge, transform: `translateY(${i * gap}px)`, zIndex: 2 - i }}>
+                              <div className="al-stacked-layer-inner">
+                                {isVideo ? (
+                                  <div className="al-stacked-video-wrap">
+                                    <video src={covers[i]} className="al-stacked-img" preload="metadata" muted playsInline />
+                                    <div className="al-stacked-play-icon">
+                                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <img src={covers[i]} alt="" className="al-stacked-img" />
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                        <div className="al-stacked-badge">{items.length}</div>
+                      </div>
+                      <div className="al-folder-item-label">{date}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            )
+          ) : (
+            <>
+              {taskStatus && (
+                <div className="task-status">
+                  <div className={`status-badge ${taskStatus === 'Success' ? 'success' : taskStatus === 'Failed' ? 'failed' : ''}`}>
+                    {taskStatus === 'Queuing' && '排队中'}
+                    {taskStatus === 'Preparing' && '准备中'}
+                    {taskStatus === 'Running' && '运行中...'}
+                    {taskStatus === 'Success' && '已完成 ✓'}
+                    {taskStatus === 'Failed' && '失败 ✗'}
+                  </div>
+                  {taskId && <span className="task-id">任务ID: {taskId}</span>}
+                  {saveStatus && <span className="save-status">{saveStatus}</span>}
+                </div>
+              )}
+
+              {taskStatus === 'Running' && (
+                <div className="progress-bar">
+                  <div className="progress-fill" />
+                </div>
+              )}
+
+              {error && (
+                <div className="error-message">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span>{typeof error === 'string' ? error : error.message}</span>
+                    {typeof error === 'object' && (error.detail || error.logs) && (
+                      <button
+                        onClick={() => setShowErrorDetail(!showErrorDetail)}
+                        style={{
+                          padding: '2px 8px',
+                          fontSize: 12,
+                          cursor: 'pointer',
+                          background: 'rgba(255,255,255,0.2)',
+                          border: '1px solid rgba(255,255,255,0.3)',
+                          borderRadius: 4,
+                          color: 'white',
+                        }}
+                      >
+                        {showErrorDetail ? '收起详情' : '查看详情'}
+                      </button>
+                    )}
+                  </div>
+                  {showErrorDetail && typeof error === 'object' && (
+                    <div style={{ marginTop: 8, fontSize: 12, maxHeight: 300, overflow: 'auto' }}>
+                      {error.detail && (
+                        <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
+                          {error.detail}
+                        </pre>
+                      )}
+                      {error.logs && (
+                        <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
+                          {error.logs}
+                        </pre>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {outputs || (!taskStatus && !error && detail.outputs_example && Object.keys(detail.outputs_example).length > 0) ? (
+                (() => {
+                  const data = outputs ? Object.entries(outputs) : Object.entries(detail.outputs_example!);
+                  const hasText = data.some(([, urls]) => urls.some(u => !/^https?:\/\//i.test(u)));
+                  return hasText ? (
+                    <div className="output-section">
+                      <div className="output-view-tabs">
+                        <button className={`ov-tab ${outputViewMode === 'preview' ? 'active' : ''}`} onClick={() => setOutputViewMode('preview')}>预览</button>
+                        <button className={`ov-tab ${outputViewMode === 'json' ? 'active' : ''}`} onClick={() => setOutputViewMode('json')}>JSON</button>
+                        <button className="ov-copy" onClick={() => {
+                          const text = outputViewMode === 'json'
+                            ? JSON.stringify(jsonForDisplay(taskResponse, outputs, detail.outputs_example), null, 2)
+                            : data.map(([, urls]) => urls.join('\n')).join('\n\n');
+                          navigator.clipboard.writeText(text);
+                        }}>复制</button>
+                      </div>
+                      <div className="output-json-wrap">
+                        {outputViewMode === 'json' ? (
+                          <pre className="output-json">{JSON.stringify(jsonForDisplay(taskResponse, outputs, detail.outputs_example), null, 2)}</pre>
+                        ) : (
+                          <div className="outputs">
+                            {data.map(([key, urls]) => {
+                              const isText = !urls.some(u => /^https?:\/\//i.test(u));
+                              return (
+                                <div key={key} className="output-group">
+                                  <div className={isText ? 'output-text-block' : 'output-grid'}>
+                                    {urls.map((url, i) => (
+                                      <div key={i} className="output-item">
+                                        {key.includes('image') || key.includes('img') ? (
+                                          <img src={url} alt={`${outputs ? 'output' : 'example'} ${i}`}
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => {
+                                              const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u, name: outputs ? '' : u.split('/').pop() })));
+                                              const idx = items.findIndex(it => it.url === url);
+                                              setViewerItems(items);
+                                              setViewerIndex(idx);
+                                            }}
+                                          />
+                                        ) : key.includes('video') ? (
+                                          <video src={url} controls
+                                            style={{ cursor: 'pointer' }}
+                                            onClick={() => {
+                                              const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u })));
+                                              const idx = items.findIndex(it => it.url === url);
+                                              setViewerItems(items);
+                                              setViewerIndex(idx);
+                                            }}
+                                          />
+                                        ) : key.includes('audio') ? (
+                                          <audio src={url} controls />
+                                        ) : isUrl(url) ? (
+                                          <a href={url} target="_blank" rel="noopener noreferrer">{outputs ? '下载文件' : '示例文件'} {i + 1}</a>
+                                        ) : (
+                                          <div className="output-text-content" dangerouslySetInnerHTML={{ __html: mdToHtml(url) }} />
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="outputs">
+                      {data.map(([key, urls]) => (
+                        <div key={key} className="output-grid">
+                          {urls.map((url, i) => (
+                            <div key={i} className="output-item">
+                              {key.includes('image') || key.includes('img') ? (
+                                <img src={url} alt={`${outputs ? 'output' : 'example'} ${i}`}
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => {
+                                    const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u, name: outputs ? '' : u.split('/').pop() })));
+                                    const idx = items.findIndex(it => it.url === url);
+                                    setViewerItems(items);
+                                    setViewerIndex(idx);
+                                  }}
+                                />
+                              ) : key.includes('video') ? (
+                                <video src={url} controls
+                                  style={{ cursor: 'pointer' }}
+                                  onClick={() => {
+                                    const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u })));
+                                    const idx = items.findIndex(it => it.url === url);
+                                    setViewerItems(items);
+                                    setViewerIndex(idx);
+                                  }}
+                                />
+                              ) : key.includes('audio') ? (
+                                <audio src={url} controls />
+                              ) : (
+                                <a href={url} target="_blank" rel="noopener noreferrer">{outputs ? '下载文件' : '示例文件'} {i + 1}</a>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()
+              ) : !taskStatus && !error && (
+                <div className="result-placeholder">
+                  <p>填写参数后点击「调用模型」开始运行</p>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      )}
+
+      {viewerIndex !== null && viewerItems.length > 0 && (
+        <MediaViewer
+          items={viewerItems}
+          initialIndex={viewerIndex}
+          onClose={() => setViewerIndex(null)}
+        />
+      )}
+
+      {historyModal && (
+        <div className="history-modal-overlay" onClick={() => setHistoryModal(null)}>
+          <div className="history-modal" onClick={e => e.stopPropagation()}>
+            <div className="history-modal-left">
+              <img src={historyModal.url} alt="" className="history-modal-img" />
+            </div>
+            <div className="history-modal-right">
+              <div className="history-modal-header">
+                <div className="history-modal-info">
+                  图片 {historyModal.index + 1} / {historyModal.list.length}
+                </div>
+                <div className="history-modal-actions">
+                  <button className="btn btn-ghost btn-reuse" onClick={() => { setFormValues({ ...historyModal.rec.formValues }); setHistoryModal(null); }}>一键复用</button>
+                  <button className="btn btn-ghost btn-del" onClick={async () => {
+                    await deleteHistory(endpoint, historyModal.rec.id);
+                    setHistoryRecords(prev => prev.filter(r => r.id !== historyModal.rec.id));
+                    const remaining = historyModal.list.filter(x => x.rec.id !== historyModal.rec.id);
+                    if (remaining.length === 0) { setHistoryModal(null); setSelectedDate(null); }
+                    else if (historyModal.index >= remaining.length) setHistoryModal({ ...remaining[remaining.length - 1], index: remaining.length - 1, list: remaining });
+                    else { const newIdx = remaining.findIndex(x => x.url === historyModal.url && x.rec.id === historyModal.rec.id); setHistoryModal({ ...remaining[newIdx >= 0 ? newIdx : 0], index: newIdx >= 0 ? newIdx : 0, list: remaining }); }
+                  }}>删除</button>
+                  <button className="history-modal-close" onClick={() => setHistoryModal(null)}>×</button>
+                </div>
+              </div>
+              <div className="history-modal-body">
+                {Object.entries(historyModal.rec.formValues).filter(([, v]) => v !== null && v !== undefined && v !== '').map(([key, val]) => {
+                  const p = detail?.input_params?.find(p => p.field_name === key);
+                  const display = Array.isArray(val) ? `[${val.length} 个文件]` : String(val);
+                  return (
+                    <div key={key} className="history-modal-field">
+                      <span className="history-modal-field-label">{p?.field_label || key}</span>
+                      <span className="history-modal-field-value">{display}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+    </div>
+  );
+}
