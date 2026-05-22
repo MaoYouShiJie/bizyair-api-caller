@@ -41,9 +41,13 @@ function InputRenderer({ param, value, onChange }: {
           <input type="range" className="field-slider" min={min} max={max} step={step}
             value={value as number ?? min} onChange={e => onChange(Number(e.target.value))} />
           <input type="number" className="field-slider-val field-slider-input" min={min} max={max} step={step}
-            value={value as number ?? min} onChange={e => {
+            value={Number(value ?? min)} onChange={e => {
+              const raw = e.target.value;
+              if (raw === '') onChange(min);
+              else { const v = Number(raw); if (!isNaN(v)) onChange(v); }
+            }} onBlur={e => {
               const v = Number(e.target.value);
-              if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
+              if (!isNaN(v)) { const clamped = Math.min(max, Math.max(min, v)); if (clamped !== v) onChange(clamped); }
             }} />
         </div>
       );
@@ -123,8 +127,12 @@ function InputRenderer({ param, value, onChange }: {
           value={Number(value ?? min)} onChange={e => onChange(Number(e.target.value))} />
         <input type="number" className="field-slider-val field-slider-input" min={min} max={max} step={step}
           value={Number(value ?? min)} onChange={e => {
+            const raw = e.target.value;
+            if (raw === '') onChange(min);
+            else { const v = Number(raw); if (!isNaN(v)) onChange(v); }
+          }} onBlur={e => {
             const v = Number(e.target.value);
-            if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v)));
+            if (!isNaN(v)) { const clamped = Math.min(max, Math.max(min, v)); if (clamped !== v) onChange(clamped); }
           }} />
       </div>
     );
@@ -250,8 +258,12 @@ function InputRenderer({ param, value, onChange }: {
           value={Number(value ?? optsMin)} onChange={e => onChange(Number(e.target.value))} />
         <input type="number" className="field-slider-val field-slider-input" min={optsMin} max={optsMax} step={step}
           value={Number(value ?? optsMin)} onChange={e => {
+            const raw = e.target.value;
+            if (raw === '') onChange(optsMin);
+            else { const v = Number(raw); if (!isNaN(v)) onChange(v); }
+          }} onBlur={e => {
             const v = Number(e.target.value);
-            if (!isNaN(v)) onChange(Math.min(optsMax, Math.max(optsMin, v)));
+            if (!isNaN(v)) { const clamped = Math.min(optsMax, Math.max(optsMin, v)); if (clamped !== v) onChange(clamped); }
           }} />
       </div>
     );

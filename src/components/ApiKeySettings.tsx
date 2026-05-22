@@ -1,15 +1,41 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 interface Props {
   open: boolean;
   onClose: () => void;
 }
 
+interface BalanceData {
+  gift_balance_amount?: number;
+  gift_balance?: number;
+  charge_balance_amount?: number;
+  charge_balance?: number;
+}
+
 export default function ApiKeySettings({ open, onClose }: Props) {
   const [key, setKey] = useState(() => localStorage.getItem('bizyair_api_key') || '');
   const [saved, setSaved] = useState(false);
+  const [balance, setBalance] = useState<BalanceData | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
-  if (!open) return null;
+  useEffect(() => {
+    if (!open) return;
+    const k = localStorage.getItem('bizyair_api_key');
+    setKey(k || '');
+    if (k) queryBalance(k);
+    else setBalance(null);
+  }, [open]);
+
+  const queryBalance = async (apiKey: string) => {
+    setBalanceLoading(true);
+    setBalance(null);
+    try {
+      const res = await fetch(`/api/balance?key=${encodeURIComponent(apiKey)}`);
+      const json = await res.json();
+      if (json.success) setBalance(json.data?.data || null);
+    } catch {}
+    setBalanceLoading(false);
+  };
 
   const saveToBackend = async (k: string) => {
     try {
@@ -35,6 +61,8 @@ export default function ApiKeySettings({ open, onClose }: Props) {
     onClose();
   };
 
+  if (!open) return null;
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()}>
@@ -50,6 +78,27 @@ export default function ApiKeySettings({ open, onClose }: Props) {
           value={key}
           onChange={e => setKey(e.target.value)}
         />
+        {key && (
+          <div className="balance-row">
+            <button className="btn btn-ghost balance-query-btn" onClick={() => queryBalance(key)} disabled={balanceLoading}>
+              {balanceLoading ? '查询中...' : '查询余额'}
+            </button>
+            {balance && (
+              <div className="balance-display">
+                <span className="balance-item">
+                  <img src="/icons/yinbi.webp" className="balance-icon" alt="" />
+                  <span className="balance-label">银币</span>
+                  <span className="balance-val">{balance.gift_balance_amount ?? balance.gift_balance ?? '?'}</span>
+                </span>
+                <span className="balance-item">
+                  <img src="/icons/jinbi.webp" className="balance-icon" alt="" />
+                  <span className="balance-label">金币</span>
+                  <span className="balance-val">{balance.charge_balance_amount ?? balance.charge_balance ?? '?'}</span>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={handleClear}>清除</button>
           <button className="btn btn-primary" onClick={handleSave}>

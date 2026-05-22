@@ -512,6 +512,18 @@ function httpsPost(url, headers, body) {
   });
 }
 
+app.get('/api/balance', async (req, res) => {
+  try {
+    const apiKey = req.query.key || getApiKey();
+    if (!apiKey) return res.status(400).json({ error: 'API Key not provided' });
+    const data = await httpsGet('https://api.bizyair.cn/y/v1/wallet',
+      { 'Authorization': `Bearer ${apiKey}` });
+    res.json({ success: true, data });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/upload-input', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
