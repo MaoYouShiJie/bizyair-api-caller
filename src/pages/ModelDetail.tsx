@@ -1,49 +1,11 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useSearchParams, Link } from 'react-router-dom';
-import { fetchModelDetail, fetchModelPrice, createTask, pollTask } from '../api/modelzoo';
-import { saveOutputs, getSavePath } from '../api/saveOutput';
-import { loadHistory, saveHistory, deleteHistory, type HistoryRecord } from '../api/history';
+import { fetchModelDetail, fetchModelPrice } from '../api/modelzoo';
+
+import { loadHistory, deleteHistory, type HistoryRecord } from '../api/history';
 import MediaViewer from '../components/MediaViewer';
+import TaskCard from '../components/TaskCard';
 import type { ModelDetail, InputParam, ModelPrice } from '../types';
-
-function isUrl(v: string) { return /^https?:\/\//i.test(v); }
-
-function jsonForDisplay(taskResponse: Record<string, unknown> | null, outputs: Record<string, string[]> | null, example: Record<string, string[]> | null) {
-  if (taskResponse) return taskResponse;
-  const out = outputs || example;
-  if (!out) return {};
-  return { request_id: '', status: 'Success', message: null, outputs: out };
-}
-
-function mdToHtml(text: string) {
-  const lines = text.split('\n');
-  let html = '';
-  let inList = false;
-  for (const raw of lines) {
-    let line = raw
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
-    if (/^###\s+(.*)/.test(line)) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<h3>${line.replace(/^###\s+/, '')}</h3>`;
-    } else if (/^[\d]+\.\s+(.*)/.test(line)) {
-      if (!inList) { html += '<ul>'; inList = true; }
-      html += `<li>${line.replace(/^[\d]+\.\s+/, '')}</li>`;
-    } else if (/^\*\*\*/.test(line)) {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += '<hr>';
-    } else if (raw.trim() === '') {
-      if (inList) { html += '</ul>'; inList = false; }
-    } else {
-      if (inList) { html += '</ul>'; inList = false; }
-      html += `<p>${line}</p>`;
-    }
-  }
-  if (inList) html += '</ul>';
-  return html;
-}
-
 const zhCategory: Record<string, string> = {
   'Text to Image': '文生图', 'Image to Image': '图生图',
   'Text to Video': '文生视频', 'Image to Video': '图生视频',
@@ -311,28 +273,22 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-const [taskId, setTaskId] = useState<string | null>(null);
-  const [error, setError] = useState<string | { message: string; detail?: string; logs?: string } | null>(null);
-  const [outputs, setOutputs] = useState<Record<string, string[]> | null>(null);
-  const [taskStatus, setTaskStatus] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+  const [taskCardKeys, setTaskCardKeys] = useState<number[]>([]);
+  const nextCardId = useRef(0);
   const [modelPrice, setModelPrice] = useState<ModelPrice | null>(null);
   const [defaultValues, setDefaultValues] = useState<Record<string, unknown> | null>(null);
   const [activeTab, setActiveTab] = useState('invoke');
-  const [outputViewMode, setOutputViewMode] = useState<'preview' | 'json'>('preview');
-  const [saveStatus, setSaveStatus] = useState('');
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
-  const [taskResponse, setTaskResponse] = useState<Record<string, unknown> | null>(null);
-  const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const [viewerItems, setViewerItems] = useState<{ url: string; name?: string; type?: string }[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [resultTab, setResultTab] = useState<'output' | 'history'>('output');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
-  const [expandedTexts, setExpandedTexts] = useState<Record<string, boolean>>({});
   const [historyModal, setHistoryModal] = useState<{ url: string; prompt: string; rec: HistoryRecord; index: number; isVideo: boolean; isAudio: boolean; isText: boolean; list: { url: string; prompt: string; rec: HistoryRecord; isVideo: boolean; isAudio: boolean; isText: boolean }[] } | null>(null);
   const [historyTextContent, setHistoryTextContent] = useState('');
+  const [historyLoading, setHistoryLoading] = useState(false);
   const [historyTextLoading, setHistoryTextLoading] = useState(false);
 
   useEffect(() => {
@@ -344,16 +300,15 @@ const [taskId, setTaskId] = useState<string | null>(null);
       .catch(() => { setHistoryTextContent('(无法加载内容)'); setHistoryTextLoading(false); });
   }, [historyModal?.url, historyModal?.isText]);
 
-  const toggleText = (key: string) => {
-    setExpandedTexts(prev => ({ ...prev, [key]: !prev[key] }));
-  };
-
   function groupByDate(records: HistoryRecord[]): Record<string, HistoryRecord[]> {
     const groups: Record<string, HistoryRecord[]> = {};
     for (const r of records) {
       const d = r.timestamp.split('T')[0];
       if (!groups[d]) groups[d] = [];
       groups[d].push(r);
+    }
+    for (const date of Object.keys(groups)) {
+      groups[date].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     }
     return Object.fromEntries(Object.entries(groups).sort(([a], [b]) => b.localeCompare(a)));
   }
@@ -397,66 +352,15 @@ const [taskId, setTaskId] = useState<string | null>(null);
       });
   }, [endpoint]);
 
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = useCallback(() => {
     if (!detail) return;
     if (!localStorage.getItem('bizyair_api_key')) {
       setApiKeyMissing(true);
       return;
     }
-
-    setSubmitting(true);
-    setError('');
-    setOutputs(null);
-    setTaskId(null);
-    setTaskStatus('提交中...');
-
-    try {
-      const result = await createTask(detail.endpoint, formValues);
-      const tid = result.request_id;
-      setTaskId(tid);
-      setTaskStatus('排队中...');
-
-      const poll = async () => {
-        const statuses = ['Queuing', 'Preparing', 'Running'];
-        while (true) {
-          await new Promise(r => setTimeout(r, 2000));
-          const data = await pollTask(tid);
-          setTaskStatus(data.status);
-
-          if (data.status === 'Success') {
-            setOutputs(data.outputs || null);
-            setTaskResponse(data as Record<string, unknown>);
-            saveHistory(endpoint, formValues, data.outputs || {}, tid).catch(() => {});
-            if (data.outputs) {
-              setSaveStatus('正在保存...');
-              saveOutputs(data.outputs, detail.display_name).then(n => {
-                setSaveStatus(n > 0 ? `已保存 ${n} 个文件` : '');
-              }).catch(() => { setSaveStatus('保存失败'); });
-            }
-            break;
-          }
-          if (data.status === 'Failed') {
-            setError({
-              message: data.message || data.error_msg || '任务执行失败',
-              detail: data.error_detail,
-              logs: data.logs
-            });
-            break;
-          }
-          if (data.status === 'Canceled') {
-            setError('任务已取消');
-            break;
-          }
-          if (!statuses.includes(data.status)) break;
-        }
-      };
-      poll();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : '调用失败');
-    } finally {
-      setSubmitting(false);
-    }
-  }, [detail, formValues]);
+    const id = ++nextCardId.current;
+    setTaskCardKeys(prev => [...prev, id]);
+  }, [detail]);
 
   const updateValue = (name: string, val: unknown) => {
     setFormValues(prev => ({ ...prev, [name]: val }));
@@ -699,13 +603,11 @@ const [taskId, setTaskId] = useState<string | null>(null);
 
             return (
               <div className="btn-row">
-                <button className="btn btn-primary btn-submit" onClick={handleSubmit} disabled={submitting}>
-                  {submitting ? '调用中...' : (
-                    <span className="btn-label">
-                      运行
-                      {priceNum !== undefined && priceNum > 0 ? <span className="btn-price"> 🟡 {priceNum}{priceUnit ? `/${priceUnit}` : ''}</span> : pt?.simple_price_text ? <span className="btn-price"> 🟡 按量计费</span> : <span className="btn-price"> 🟡 ?</span>}
-                    </span>
-                  )}
+                <button className="btn btn-primary btn-submit" onClick={handleSubmit}>
+                  <span className="btn-label">
+                    运行
+                    {priceNum !== undefined && priceNum > 0 ? <span className="btn-price"> 🟡 {priceNum}{priceUnit ? `/${priceUnit}` : ''}</span> : pt?.simple_price_text ? <span className="btn-price"> 🟡 按量计费</span> : <span className="btn-price"> 🟡 ?</span>}
+                  </span>
                 </button>
                 <button className="btn btn-ghost btn-reset" onClick={() => defaultValues && setFormValues({ ...defaultValues })}>
                   重置
@@ -829,168 +731,17 @@ const [taskId, setTaskId] = useState<string | null>(null);
             )
           ) : (
             <>
-              {taskStatus && (
-                <div className="task-status">
-                  <div className={`status-badge ${taskStatus === 'Success' ? 'success' : taskStatus === 'Failed' ? 'failed' : ''}`}>
-                    {taskStatus === 'Queuing' && '排队中'}
-                    {taskStatus === 'Preparing' && '准备中'}
-                    {taskStatus === 'Running' && '运行中...'}
-                    {taskStatus === 'Success' && '已完成 ✓'}
-                    {taskStatus === 'Failed' && '失败 ✗'}
-                  </div>
-                  {taskId && <span className="task-id">任务ID: {taskId}</span>}
-                  {saveStatus && <span className="save-status">{saveStatus}</span>}
-                </div>
-              )}
-
-              {taskStatus === 'Running' && (
-                <div className="progress-bar">
-                  <div className="progress-fill" />
-                </div>
-              )}
-
-              {error && (
-                <div className="error-message">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <span>{typeof error === 'string' ? error : error.message}</span>
-                    {typeof error === 'object' && (error.detail || error.logs) && (
-                      <button
-                        onClick={() => setShowErrorDetail(!showErrorDetail)}
-                        style={{
-                          padding: '2px 8px',
-                          fontSize: 12,
-                          cursor: 'pointer',
-                          background: 'rgba(255,255,255,0.2)',
-                          border: '1px solid rgba(255,255,255,0.3)',
-                          borderRadius: 4,
-                          color: 'white',
-                        }}
-                      >
-                        {showErrorDetail ? '收起详情' : '查看详情'}
-                      </button>
-                    )}
-                  </div>
-                  {showErrorDetail && typeof error === 'object' && (
-                    <div style={{ marginTop: 8, fontSize: 12, maxHeight: 300, overflow: 'auto' }}>
-                      {error.detail && (
-                        <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
-                          {error.detail}
-                        </pre>
-                      )}
-                      {error.logs && (
-                        <pre style={{ whiteSpace: 'pre-wrap', margin: '4px 0', padding: 8, background: 'rgba(0,0,0,0.2)', borderRadius: 4 }}>
-                          {error.logs}
-                        </pre>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {outputs || (!taskStatus && !error && detail.outputs_example && Object.keys(detail.outputs_example).length > 0) ? (
-                (() => {
-                  const data = outputs ? Object.entries(outputs) : Object.entries(detail.outputs_example!);
-                  const hasText = data.some(([, urls]) => urls.some(u => !/^https?:\/\//i.test(u)));
-                  return hasText ? (
-                    <div className="output-section">
-                      <div className="output-view-tabs">
-                        <button className={`ov-tab ${outputViewMode === 'preview' ? 'active' : ''}`} onClick={() => setOutputViewMode('preview')}>预览</button>
-                        <button className={`ov-tab ${outputViewMode === 'json' ? 'active' : ''}`} onClick={() => setOutputViewMode('json')}>JSON</button>
-                        <button className="ov-copy" onClick={() => {
-                          const text = outputViewMode === 'json'
-                            ? JSON.stringify(jsonForDisplay(taskResponse, outputs, detail.outputs_example), null, 2)
-                            : data.map(([, urls]) => urls.join('\n')).join('\n\n');
-                          navigator.clipboard.writeText(text);
-                        }}>复制</button>
-                      </div>
-                      <div className="output-json-wrap">
-                        {outputViewMode === 'json' ? (
-                          <pre className="output-json">{JSON.stringify(jsonForDisplay(taskResponse, outputs, detail.outputs_example), null, 2)}</pre>
-                        ) : (
-                          <div className="outputs">
-                            {data.map(([key, urls]) => {
-                              const isText = !urls.some(u => /^https?:\/\//i.test(u));
-                              return (
-                                <div key={key} className="output-group">
-                                  <div className={isText ? 'output-text-block' : 'output-grid'}>
-                                    {urls.map((url, i) => (
-                                      <div key={i} className="output-item">
-                                        {key.includes('image') || key.includes('img') ? (
-                                          <img src={url} alt={`${outputs ? 'output' : 'example'} ${i}`}
-                                            style={{ cursor: 'pointer' }}
-                                            onClick={() => {
-                                              const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u, name: outputs ? '' : u.split('/').pop() })));
-                                              const idx = items.findIndex(it => it.url === url);
-                                              setViewerItems(items);
-                                              setViewerIndex(idx);
-                                            }}
-                                          />
-                                        ) : key.includes('video') ? (
-                                          <video src={url} controls
-                                            style={{ cursor: 'pointer' }}
-                                            onClick={() => {
-                                              const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u })));
-                                              const idx = items.findIndex(it => it.url === url);
-                                              setViewerItems(items);
-                                              setViewerIndex(idx);
-                                            }}
-                                          />
-                                        ) : key.includes('audio') ? (
-                                          <audio src={url} controls />
-                                        ) : isUrl(url) ? (
-                                          <a href={url} target="_blank" rel="noopener noreferrer">{outputs ? '下载文件' : '示例文件'} {i + 1}</a>
-                                        ) : (
-                                          <div className="output-text-content" dangerouslySetInnerHTML={{ __html: mdToHtml(url) }} />
-                                        )}
-                                      </div>
-                                    ))}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="outputs">
-                      {data.map(([key, urls]) => (
-                        <div key={key} className="output-grid">
-                          {urls.map((url, i) => (
-                            <div key={i} className="output-item">
-                              {key.includes('image') || key.includes('img') ? (
-                                <img src={url} alt={`${outputs ? 'output' : 'example'} ${i}`}
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={() => {
-                                    const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u, name: outputs ? '' : u.split('/').pop() })));
-                                    const idx = items.findIndex(it => it.url === url);
-                                    setViewerItems(items);
-                                    setViewerIndex(idx);
-                                  }}
-                                />
-                              ) : key.includes('video') ? (
-                                <video src={url} controls
-                                  style={{ cursor: 'pointer' }}
-                                  onClick={() => {
-                                    const items = data.flatMap(([, us]) => (us as string[]).map(u => ({ url: u })));
-                                    const idx = items.findIndex(it => it.url === url);
-                                    setViewerItems(items);
-                                    setViewerIndex(idx);
-                                  }}
-                                />
-                              ) : key.includes('audio') ? (
-                                <audio src={url} controls />
-                              ) : (
-                                <a href={url} target="_blank" rel="noopener noreferrer">{outputs ? '下载文件' : '示例文件'} {i + 1}</a>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()
-              ) : !taskStatus && !error && (
+              {taskCardKeys.map(id => (
+                <TaskCard
+                  key={id}
+                  detail={detail}
+                  endpoint={endpoint}
+                  formValues={formValues}
+                  onRemove={() => setTaskCardKeys(prev => prev.filter(k => k !== id))}
+                  onViewMedia={(items, index) => { setViewerItems(items as { url: string; name?: string; type?: string }[]); setViewerIndex(index); }}
+                />
+              ))}
+              {taskCardKeys.length === 0 && (
                 <div className="result-placeholder">
                   <p>填写参数后点击「调用模型」开始运行</p>
                 </div>

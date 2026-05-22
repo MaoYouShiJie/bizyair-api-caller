@@ -235,12 +235,13 @@ export default function AssetLibrary({ onClose }: Props) {
   };
 
   const handleDelete = async (file: AssetFile) => {
-    if (!confirm(`确定删除 "${file.name}"？`)) return;
+    if (!confirm(`确定删除 "${file.name}"？`)) return false;
     const ok = await deleteFile(file.path);
     if (ok) {
       setFiles(prev => prev.filter(f => f.name !== file.name));
       if (currentFolder) delete folderCacheRef.current[currentFolder];
     }
+    return ok;
   };
 
   const saveDirToBackend = (p: string) => {
@@ -384,6 +385,10 @@ export default function AssetLibrary({ onClose }: Props) {
           items={viewerItems}
           initialIndex={viewerIndex}
           onClose={() => setViewerIndex(null)}
+          onDelete={(url) => {
+            const file = files.find(f => f.url === url);
+            if (file) handleDelete(file).then(ok => ok && setViewerIndex(null));
+          }}
         />
       )}
 

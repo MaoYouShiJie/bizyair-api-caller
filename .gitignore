@@ -1,5 +1,6 @@
 node_modules/
 dist/
+release/
 .thumbcache/
 .playwright-mcp/
 history.json
