@@ -120,6 +120,7 @@ export default function Home({ onOpenSettings, onOpenAssetLibrary }: { onOpenSet
         <div className="page-header">
           <div className="page-header-top">
             <img src="/logo.png" alt="BizyAir" className="page-logo" />
+            <span style={{fontSize:'11px',color:'var(--text-muted)',marginLeft:'4px',alignSelf:'flex-end',marginBottom:'3px'}}>v0.0.1</span>
             <button className="btn btn-ghost api-key-btn" onClick={onOpenSettings}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="3" />
