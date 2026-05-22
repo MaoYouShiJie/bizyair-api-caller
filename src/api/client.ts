@@ -2,8 +2,6 @@ let _cachedKey: string | null = null;
 
 export async function loadApiKeyFromBackend(): Promise<string> {
   if (_cachedKey) return _cachedKey;
-  const local = localStorage.getItem('bizyair_api_key');
-  if (local) { _cachedKey = local; return local; }
   try {
     const res = await fetch('/api/config/api-key');
     const data = await res.json();
@@ -13,6 +11,8 @@ export async function loadApiKeyFromBackend(): Promise<string> {
       return data.apiKey;
     }
   } catch {}
+  const local = localStorage.getItem('bizyair_api_key');
+  if (local) { _cachedKey = local; return local; }
   return '';
 }
 
