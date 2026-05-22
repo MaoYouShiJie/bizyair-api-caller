@@ -6,12 +6,13 @@ export interface AssetFile {
   modelName: string;
   size: number;
   path: string;
+  preview?: string;
 }
 
 export interface AssetFolder {
   name: string;
   fileCount: number;
-  covers: string[];
+  covers: { path: string; type: string; preview?: string }[];
 }
 
 export async function pickSaveDir(): Promise<string | null> {

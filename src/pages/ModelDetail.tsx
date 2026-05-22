@@ -183,9 +183,16 @@ function InputRenderer({ param, value, onChange }: {
         return;
       }
       setLoading(true);
-      const reader = new FileReader();
-      reader.onload = (e) => { cb(e.target?.result as string); setLoading(false); };
-      reader.readAsDataURL(file);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', file.name);
+      fetch('/api/upload-input', { method: 'POST', body: formData })
+        .then(r => r.json())
+        .then(d => {
+          if (d.url) { cb(d.url); } else { alert(d.error || '上传失败'); }
+        })
+        .catch(() => alert('上传失败'))
+        .finally(() => setLoading(false));
     };
 
     const addFile = (file: File) => {
@@ -318,13 +325,24 @@ const [taskId, setTaskId] = useState<string | null>(null);
   const [taskResponse, setTaskResponse] = useState<Record<string, unknown> | null>(null);
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const [viewerItems, setViewerItems] = useState<{ url: string; name?: string }[]>([]);
+  const [viewerItems, setViewerItems] = useState<{ url: string; name?: string; type?: string }[]>([]);
   const [searchParams, setSearchParams] = useSearchParams();
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [resultTab, setResultTab] = useState<'output' | 'history'>('output');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [expandedTexts, setExpandedTexts] = useState<Record<string, boolean>>({});
-  const [historyModal, setHistoryModal] = useState<{ url: string; prompt: string; rec: HistoryRecord; index: number; list: { url: string; prompt: string; rec: HistoryRecord }[] } | null>(null);
+  const [historyModal, setHistoryModal] = useState<{ url: string; prompt: string; rec: HistoryRecord; index: number; isVideo: boolean; isAudio: boolean; isText: boolean; list: { url: string; prompt: string; rec: HistoryRecord; isVideo: boolean; isAudio: boolean; isText: boolean }[] } | null>(null);
+  const [historyTextContent, setHistoryTextContent] = useState('');
+  const [historyTextLoading, setHistoryTextLoading] = useState(false);
+
+  useEffect(() => {
+    if (!historyModal?.isText) { setHistoryTextContent(''); return; }
+    setHistoryTextLoading(true);
+    fetch(historyModal.url)
+      .then(r => r.ok ? r.text() : '')
+      .then(t => { setHistoryTextContent(t); setHistoryTextLoading(false); })
+      .catch(() => { setHistoryTextContent('(无法加载内容)'); setHistoryTextLoading(false); });
+  }, [historyModal?.url, historyModal?.isText]);
 
   const toggleText = (key: string) => {
     setExpandedTexts(prev => ({ ...prev, [key]: !prev[key] }));
@@ -719,60 +737,90 @@ const [taskId, setTaskId] = useState<string | null>(null);
                 <div className="al-file-grid">
                   {(() => {
                     const items = groupByDate(historyRecords)[selectedDate] || [];
-                    const allImages: { url: string; prompt: string; rec: HistoryRecord }[] = [];
+                    const allItems: { url: string; prompt: string; rec: HistoryRecord; isVideo: boolean; isAudio: boolean; isText: boolean }[] = [];
                     for (const rec of items) {
                       const prompt = Object.entries(rec.formValues)
                         .filter(([, v]) => !Array.isArray(v) && typeof v === 'string')
                         .map(([, v]) => v).join(' | ');
                       const urls = Object.values(rec.outputs).flat();
                       for (const url of urls) {
-                        allImages.push({ url, prompt, rec });
+                        const isText = !/^https?:\/\//i.test(url);
+                        allItems.push({ url, prompt, rec, isVideo: !isText && /\.(mp4|webm|mov|avi|mkv)$/i.test(url), isAudio: !isText && /\.(mp3|wav|ogg|m4a|flac|aac|wma)$/i.test(url), isText });
                       }
                     }
-                    return allImages.map((img, i) => (
-                      <div key={i} className="al-thumb-wrap history-img-wrap" onClick={() => setHistoryModal({ ...img, index: i, list: allImages })}>
-                        <img src={img.url} alt="" className="al-thumb-img" loading="eager" />
-                        <div className="history-tooltip">{img.prompt || '无提示词'}</div>
+                    return allItems.map((item, i) => (
+                      <div key={i} className="al-thumb-wrap history-img-wrap" onClick={() => setHistoryModal({ ...item, index: i, list: allItems })}>
+                        {item.isText ? (
+                          <div className="al-thumb-text al-thumb-text-preview">
+                            <span className="al-thumb-text-preview-content">{item.url.slice(0, 200)}</span>
+                          </div>
+                        ) : item.isVideo ? (
+                          <video src={item.url} className="al-thumb-img" preload="metadata" muted playsInline />
+                        ) : item.isAudio ? (
+                          <div className="al-thumb-audio-wrap"><audio src={item.url} controls preload="none" /></div>
+                        ) : (
+                          <img src={item.url} alt="" className="al-thumb-img" loading="eager" />
+                        )}
+                        <div className="history-tooltip">{item.prompt || '无提示词'}</div>
                       </div>
                     ));
                   })()}
                 </div>
               </div>
             ) : (
-              <div className="al-folder-grid">
+              <div className="al-folder-grid" style={{ paddingTop: 16, paddingLeft: 12 }}>
                 {Object.entries(groupByDate(historyRecords)).map(([date, items]) => {
                   const allCovers = items.flatMap(r => Object.values(r.outputs).flat()).filter(u => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov|avi|mkv)$/i.test(u));
                   const covers = allCovers.slice(0, 3).reverse();
+                  const hasTextOnly = covers.length === 0 && items.some(r => Object.values(r.outputs).flat().some(u => !/^https?:\/\//i.test(u)));
                   return (
                     <div key={date} className="al-folder-item">
-                      <div
-                        className="al-stacked-folder"
-                        onClick={() => setSelectedDate(date)}
-                      >
-                        {[0, 1, 2].map(i => {
-                          if (!covers[i]) return null;
-                          const edge = 4;
-                          const gap = 18;
-                          const isVideo = /\.(mp4|webm|mov|avi|mkv)$/i.test(covers[i]);
-                          return (
-                            <div key={i} className="al-stacked-layer" style={{ top: edge, left: edge + i * gap, right: edge + (2 - i) * gap, bottom: edge, transform: `translateY(${i * gap}px)`, zIndex: 2 - i }}>
-                              <div className="al-stacked-layer-inner">
-                                {isVideo ? (
-                                  <div className="al-stacked-video-wrap">
-                                    <video src={covers[i]} className="al-stacked-img" preload="metadata" muted playsInline />
-                                    <div className="al-stacked-play-icon">
-                                      <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                        {hasTextOnly ? (
+                          <div className="al-stacked-folder" onClick={() => setSelectedDate(date)}>
+                            {[0, 1, 2].map(i => {
+                              const edge = 4; const gap = 18;
+                              return (
+                                  <div key={i} className="al-stacked-layer"
+                                       style={{ top: edge + i * gap, left: edge + i * gap, right: edge + (2 - i) * gap, bottom: edge, transform: `translateY(${i * gap}px)`, zIndex: 2 - i, overflow: 'visible' }}>
+                                    <div className="al-stacked-layer-inner" style={{ overflow: 'visible' }}>
+                                      <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                                        <div className="al-thumb-text al-thumb-text-preview" style={{width:'100%',height:'85%',borderRadius:'12px',flexShrink:0,boxShadow:'inset 0 0 8px 3px rgba(0,0,0,.6)'}}>
+                                          <span className="al-thumb-text-preview-content">{(Object.values(items[0]?.outputs || {}).flat().find(u => !/^https?:\/\//i.test(u)) || '文本').slice(0, 200)}</span>
+                                        </div>
+                                      </div>
                                     </div>
                                   </div>
-                                ) : (
-                                  <img src={covers[i]} alt="" className="al-stacked-img" />
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                        <div className="al-stacked-badge">{items.length}</div>
-                      </div>
+                              );
+                            })}
+                            <div className="al-stacked-badge">{items.length}</div>
+                          </div>
+                        ) : (
+                          <div className="al-stacked-folder" onClick={() => setSelectedDate(date)}>
+                            {[0, 1, 2].map(i => {
+                              const edge = 4; const gap = 18;
+                              const coverIdx = 2 - i;
+                              if (!covers[coverIdx]) return null;
+                              const isVideo = /\.(mp4|webm|mov|avi|mkv)$/i.test(covers[coverIdx]);
+                              return (
+                                <div key={i} className="al-stacked-layer" style={{ top: edge, left: edge + i * gap, right: edge + (2 - i) * gap, bottom: edge, transform: `translateY(${i * gap}px)`, zIndex: 2 - i }}>
+                                  <div className="al-stacked-layer-inner">
+                                    {isVideo ? (
+                                      <div className="al-stacked-video-wrap">
+                                        <video src={covers[coverIdx]} className="al-stacked-img" preload="metadata" muted playsInline />
+                                        <div className="al-stacked-play-icon">
+                                          <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <img src={covers[coverIdx]} alt="" className="al-stacked-img" />
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            <div className="al-stacked-badge">{items.length}</div>
+                          </div>
+                        )}
                       <div className="al-folder-item-label">{date}</div>
                     </div>
                   );
@@ -965,12 +1013,23 @@ const [taskId, setTaskId] = useState<string | null>(null);
         <div className="history-modal-overlay" onClick={() => setHistoryModal(null)}>
           <div className="history-modal" onClick={e => e.stopPropagation()}>
             <div className="history-modal-left">
-              <img src={historyModal.url} alt="" className="history-modal-img" />
+              {historyModal.isText ? (
+                <div className="history-modal-text-wrap">
+                  <button className="history-modal-text-copy-btn" onClick={() => { navigator.clipboard.writeText(historyTextContent); }}>复制</button>
+                  {historyTextLoading ? <div className="history-modal-text-loading">加载中...</div> : <pre className="history-modal-text">{historyTextContent}</pre>}
+                </div>
+              ) : historyModal.isVideo ? (
+                <video src={historyModal.url} controls className="history-modal-img" />
+              ) : historyModal.isAudio ? (
+                <div className="history-modal-audio-wrap"><audio src={historyModal.url} controls /></div>
+              ) : (
+                <img src={historyModal.url} alt="" className="history-modal-img" />
+              )}
             </div>
             <div className="history-modal-right">
               <div className="history-modal-header">
                 <div className="history-modal-info">
-                  图片 {historyModal.index + 1} / {historyModal.list.length}
+                  {historyModal.isText ? '文本' : historyModal.isVideo ? '视频' : historyModal.isAudio ? '音频' : '图片'} {historyModal.index + 1} / {historyModal.list.length}
                 </div>
                 <div className="history-modal-actions">
                   <button className="btn btn-ghost btn-reuse" onClick={() => { setFormValues({ ...historyModal.rec.formValues }); setHistoryModal(null); }}>一键复用</button>

@@ -1,9 +1,12 @@
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const multer = require('multer');
 
 const app = express();
 const PORT = process.env.PORT || 3004;
+const upload = multer({ storage: multer.memoryStorage() });
 
 let dataDir = path.join(__dirname, '..');
 let configPath = path.join(dataDir, 'config.json');
@@ -75,9 +78,23 @@ const MIME_TYPES = {
   '.txt': 'text/plain', '.json': 'application/json', '.md': 'text/markdown',
 };
 
-function extType(ext) {
+function extType(ext, filePath) {
   const e = ext.toLowerCase();
-  if (['.jpg','.jpeg','.png','.gif','.webp','.bmp','.svg'].includes(e)) return 'image';
+  if (['.jpg','.jpeg','.png','.gif','.webp','.bmp','.svg'].includes(e)) {
+    if (filePath) {
+      try {
+        const fd = fs.openSync(filePath, 'r');
+        const buf = Buffer.alloc(8);
+        fs.readSync(fd, buf, 0, 8, 0);
+        fs.closeSync(fd);
+        if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4E && buf[3] === 0x47) return 'image';
+        if (buf[0] === 0xFF && buf[1] === 0xD8) return 'image';
+        if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image';
+        return 'text';
+      } catch { return 'text'; }
+    }
+    return 'image';
+  }
   if (['.mp4','.webm','.mov','.avi','.mkv'].includes(e)) return 'video';
   if (['.mp3','.wav','.ogg','.flac','.aac'].includes(e)) return 'audio';
   if (['.txt','.json','.md'].includes(e)) return 'text';
@@ -136,9 +153,11 @@ app.post('/api/save-outputs', async (req, res) => {
         counter++;
         const isVideo = mimeKey.includes('video');
         const isAudio = mimeKey.includes('audio');
+        const isText = !url.startsWith('data:') && !/^https?:\/\//i.test(url);
         let ext = '.png';
         if (isVideo) ext = '.mp4';
         else if (isAudio) ext = '.mp3';
+        else if (isText) ext = '.txt';
         else {
           const u = url.split('?')[0];
           const m = u.match(/\.(\w+)$/);
@@ -208,13 +227,19 @@ app.get('/api/gallery', (req, res) => {
           }
         } else {
           const ext = path.extname(item.name).toLowerCase();
-          const type = extType(ext);
+          const type = extType(ext, fullPath);
           if (!type || type === 'other') continue;
           const stat = fs.statSync(fullPath);
           let relativePath = item.name;
           if (currentDate) relativePath = `${currentDate}/${relativePath}`;
           if (currentApp) relativePath = `${currentApp}/${relativePath}`;
           const fileUrl = `/输出/${relativePath}`;
+          let preview = '';
+          if (type === 'text') {
+            try {
+              preview = fs.readFileSync(fullPath, 'utf8').slice(0, 200).replace(/\n/g, ' ');
+            } catch {}
+          }
           files.push({
             name: item.name,
             path: fileUrl,
@@ -224,6 +249,7 @@ app.get('/api/gallery', (req, res) => {
             size: stat.size,
             mtime: stat.mtimeMs,
             type,
+            preview,
           });
         }
       }
@@ -250,7 +276,7 @@ app.get('/api/gallery', (req, res) => {
     for (const appName of Array.from(apps).sort()) {
       const appFiles = filtered.filter(f => f.app === appName);
       if (appFiles.length === 0) continue;
-      const covers = appFiles.filter(f => f.type === 'image').slice(0, 3).map(f => f.path);
+      const covers = appFiles.slice(0, 3).map(f => ({ path: f.path, type: f.type, preview: f.preview || '' }));
       folders.push({ name: appName, fileCount: appFiles.length, covers });
     }
 
@@ -390,6 +416,116 @@ app.delete('/api/history/:endpoint/:id', (req, res) => {
     }
     res.json({ success: true });
   } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+function getApiKey() {
+  try {
+    const s = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    return s.apiKey || '';
+  } catch { return ''; }
+}
+
+function ossPut(bucket, endpoint, objectKey, fileBuffer, contentType, stsToken, accessKeyId, accessKeySecret) {
+  return new Promise((resolve, reject) => {
+    const date = new Date().toUTCString();
+    const ossHeaders = `x-oss-security-token:${stsToken}`;
+    const resource = `/${bucket}/${objectKey}`;
+    const stringToSign = `PUT\n\n${contentType}\n${date}\n${ossHeaders}\n${resource}`;
+    const signature = crypto.createHmac('sha1', accessKeySecret).update(stringToSign).digest('base64');
+    const auth = `OSS ${accessKeyId}:${signature}`;
+
+    const host = `${bucket}.${endpoint}`;
+    const options = {
+      hostname: host, port: 443, path: '/' + objectKey, method: 'PUT',
+      headers: {
+        'Content-Type': contentType, 'Content-Length': fileBuffer.length,
+        'Date': date, 'Authorization': auth, 'x-oss-security-token': stsToken,
+      }
+    };
+    const req = require('https').request(options, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => resolve({ status: res.statusCode, body }));
+    });
+    req.on('error', reject);
+    req.write(fileBuffer);
+    req.end();
+  });
+}
+
+function httpsGet(url, headers) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const opts = { hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'GET', headers };
+    const req = require('https').request(opts, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(body)); } catch { resolve(body); }
+      });
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function httpsPost(url, headers, body) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const data = JSON.stringify(body);
+    const opts = {
+      hostname: u.hostname, port: 443, path: u.pathname + u.search, method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(data) },
+    };
+    const req = require('https').request(opts, (res) => {
+      let resp = '';
+      res.on('data', c => resp += c);
+      res.on('end', () => {
+        try { resolve(JSON.parse(resp)); } catch { resolve(resp); }
+      });
+    });
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
+
+app.post('/api/upload-input', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const apiKey = getApiKey();
+    if (!apiKey) return res.status(400).json({ error: 'API Key not configured' });
+
+    const fileName = req.body.name || req.file.originalname;
+    const fileBuffer = req.file.buffer;
+    const ext = path.extname(fileName).toLowerCase();
+    const mimeMap = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif', '.mp4': 'video/mp4', '.webm': 'video/webm', '.mp3': 'audio/mpeg', '.wav': 'audio/wav' };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    // Step 1: Get STS upload token
+    const tokenResp = await httpsGet(`https://api.bizyair.cn/x/v1/upload/token?file_name=${encodeURIComponent(fileName)}&file_type=inputs`,
+      { 'Authorization': `Bearer ${apiKey}` });
+
+    if (!tokenResp?.data?.file) throw new Error('Failed to get upload token: ' + JSON.stringify(tokenResp));
+    const { object_key, access_key_id, access_key_secret, security_token } = tokenResp.data.file;
+    const { endpoint: ossEndpoint, bucket } = tokenResp.data.storage;
+
+    // Step 2: Upload to OSS
+    const uploadResult = await ossPut(bucket, ossEndpoint, object_key, fileBuffer, contentType, security_token, access_key_id, access_key_secret);
+    if (uploadResult.status !== 200) throw new Error(`OSS upload failed: ${uploadResult.status} ${uploadResult.body}`);
+
+    // Step 3: Commit the resource
+    const commitResp = await httpsPost('https://api.bizyair.cn/x/v1/input_resource/commit',
+      { 'Authorization': `Bearer ${apiKey}` },
+      { name: fileName, object_key });
+
+    if (!commitResp?.data?.url) throw new Error('Failed to commit: ' + JSON.stringify(commitResp));
+
+    res.json({ success: true, url: commitResp.data.url });
+  } catch (e) {
+    console.error('Upload error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

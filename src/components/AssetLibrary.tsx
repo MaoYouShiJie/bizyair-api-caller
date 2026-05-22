@@ -28,11 +28,12 @@ const EDGE = 4;
 const GAP = 18;
 
 function StackedFolder({ folder, onClick }: { folder: AssetFolder; onClick: () => void }) {
-  const coverImages = (folder.covers || []).slice().reverse();
-  const layers: (string | null)[] = [];
-  for (let i = 0; i < 3; i++) layers.push(coverImages[i] || null);
-  const hasRealCovers = layers.filter(Boolean).length;
+  const coverImages = (folder.covers || []).slice();
+  const n = Math.min(coverImages.length, 3);
+  const stackN = n === 1 ? 3 : n;
+  const startIdx = 3 - n;
   const [glow, setGlow] = useState(false);
+  const [imgFail, setImgFail] = useState<Record<string, boolean>>({});
 
   return (
     <div
@@ -47,28 +48,59 @@ function StackedFolder({ folder, onClick }: { folder: AssetFolder; onClick: () =
         transition: 'filter 0.25s ease',
       }}
     >
-      {layers.map((url, i) => {
-        const left = EDGE + i * GAP;
-        const right = EDGE + (2 - i) * GAP;
-        if (i >= hasRealCovers) return null;
+      {Array.from({ length: 3 }).map((_, i) => {
+        if (i < startIdx) return null;
+        const coverIdx = i - startIdx;
+        const cover = coverIdx < coverImages.length ? coverImages[coverIdx] : null;
+        const layerIdx = coverIdx;
+        const left = EDGE + layerIdx * GAP;
+        const right = EDGE + (stackN - 1 - layerIdx) * GAP;
+        const t = cover ? (cover.type || (() => { const ext = (cover.path || '').split('.').pop()?.toLowerCase(); if (['mp4','webm','mov','avi'].includes(ext || '')) return 'video'; if (['mp3','wav','ogg','m4a','flac','aac'].includes(ext || '')) return 'audio'; if (['json','txt','csv','md','log','html','xml'].includes(ext || '')) return 'text'; return 'image'; })()) : '';
+        const layerStyle = {
+          top: EDGE + layerIdx * GAP,
+          left,
+          right,
+          bottom: EDGE,
+          transform: `translateY(${layerIdx * GAP}px)`,
+          zIndex: 2 - layerIdx,
+          ...(t === 'text' ? { overflow: 'visible' } : {}),
+        };
+        if (!cover) return <div key={i} className="al-stacked-layer" style={layerStyle}><div className="al-stacked-layer-inner"><div className="al-stacked-placeholder" /></div></div>;
         return (
-          <div
-            key={i}
-            className="al-stacked-layer"
-            style={{
-              top: EDGE,
-              left,
-              right,
-              bottom: EDGE,
-              transform: `translateY(${i * GAP}px)`,
-              zIndex: 2 - i,
-            }}
-          >
-            <div className="al-stacked-layer-inner">
+          <div key={i} className="al-stacked-layer" style={layerStyle}>
+            <div className="al-stacked-layer-inner" style={t === 'text' ? { overflow: 'visible' } : undefined}>
               {(() => {
-                const type = getMediaType({ ...folder, type: (() => { const ext = (url || '').split('.').pop()?.toLowerCase(); if (['mp4','webm','mov','avi'].includes(ext || '')) return 'video'; if (['mp3','wav','ogg','m4a','flac','aac'].includes(ext || '')) return 'audio'; if (['json','txt','csv','md','log','html','xml'].includes(ext || '')) return 'text'; return 'image'; })() });
-                if (type === 'image') {
-                  return <img src={getThumbUrl(url)} alt="" className="al-stacked-img" loading="eager" />;
+                if (t === 'image') {
+                  return imgFail[cover.path] ? (
+                    <div className="al-thumb-text" style={{width:'100%',height:'100%',borderRadius:'12px'}}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="al-thumb-text-icon">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                      </svg>
+                      <span className="al-thumb-text-label">{(cover.path || '').split('.').pop()?.toUpperCase()}</span>
+                    </div>
+                  ) : <img src={getThumbUrl(cover.path)} alt="" className="al-stacked-img" loading="eager" onError={() => setImgFail(p => ({ ...p, [cover.path]: true }))} />;
+                }
+                if (t === 'video') {
+                  return (
+                    <div className="al-stacked-video-wrap">
+                      <video src={cover.path} className="al-stacked-img" preload="auto" muted playsInline />
+                      <div className="al-stacked-play-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="white"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                      </div>
+                    </div>
+                  );
+                }
+                if (t === 'text') {
+                  return (
+                    <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                      <div className="al-thumb-text al-thumb-text-preview" style={{width:'100%',height:'85%',borderRadius:'12px',flexShrink:0,boxShadow:'inset 0 0 8px 3px rgba(0,0,0,.6)'}}>
+                        <span className="al-thumb-text-preview-content">{cover?.preview || '文本'}</span>
+                      </div>
+                    </div>
+                  );
                 }
                 return <div className="al-stacked-placeholder" />;
               })()}
@@ -76,7 +108,7 @@ function StackedFolder({ folder, onClick }: { folder: AssetFolder; onClick: () =
           </div>
         );
       })}
-      <div className="al-stacked-badge">
+      <div className="al-stacked-badge" style={n < 3 ? { bottom: -4 + n * 6, right: -4 + n * 6 } : {}}>
         {folder.fileCount}
       </div>
     </div>
@@ -85,19 +117,20 @@ function StackedFolder({ folder, onClick }: { folder: AssetFolder; onClick: () =
 
 function MediaThumb({ file, onClick }: { file: AssetFile; onClick: () => void }) {
   const mediaType = getMediaType(file);
+  const [imgFailed, setImgFailed] = useState(false);
 
   return (
     <div
       className="al-thumb-wrap"
       onClick={onClick}
     >
-      {mediaType === 'image' ? (
+      {mediaType === 'image' && !imgFailed ? (
         <img
           src={getThumbUrl(file.path)}
           alt={file.name}
           loading="eager"
           className="al-thumb-img"
-          onError={(e) => { (e.target as HTMLImageElement).style.background = '#334155'; }}
+          onError={() => setImgFailed(true)}
         />
       ) : mediaType === 'video' ? (
         <video
@@ -108,17 +141,7 @@ function MediaThumb({ file, onClick }: { file: AssetFile; onClick: () => void })
           playsInline
           onError={(e) => { (e.target as HTMLVideoElement).style.display = 'none'; }}
         />
-      ) : mediaType === 'text' ? (
-        <div className="al-thumb-text">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="al-thumb-text-icon">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14 2 14 8 20 8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-          </svg>
-          <span className="al-thumb-text-label">{file.name.split('.').pop()?.toUpperCase()}</span>
-        </div>
-      ) : (
+      ) : mediaType === 'audio' ? (
         <div className="al-thumb-audio">
           <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="al-thumb-audio-icon">
             <path d="M9 18V5l12-2v13"/>
@@ -127,8 +150,22 @@ function MediaThumb({ file, onClick }: { file: AssetFile; onClick: () => void })
           </svg>
           <span className="al-thumb-text-label">{file.name.split('.').pop()?.toUpperCase()}</span>
         </div>
+      ) : mediaType === 'text' && file.preview ? (
+        <div className="al-thumb-text al-thumb-text-preview">
+          <span className="al-thumb-text-preview-content">{file.preview}</span>
+        </div>
+      ) : (
+        <div className="al-thumb-text">
+          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="al-thumb-text-icon">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+          </svg>
+          <span className="al-thumb-text-label">文本</span>
+        </div>
       )}
-      {(mediaType === 'video' || mediaType === 'text') && (
+      {(mediaType === 'video' || (mediaType === 'text' && file.type !== 'text')) && (
         <div className="al-thumb-type-tag">
           {file.name.split('.').pop()?.toUpperCase()}
         </div>
@@ -252,25 +289,19 @@ export default function AssetLibrary({ onClose }: Props) {
         <div className="al-header-bar">
           <div className="al-header-left">
             {view === 'folder' ? (
-              <>
-                <button className="al-hdr-btn al-hdr-back" onClick={goBack}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="15 18 9 12 15 6"/>
-                  </svg>
-                  返回资产库
-                </button>
+              <div className="al-header-left">
                 <span className="al-hdr-title">{currentFolder}</span>
                 <span className="al-hdr-count">· {imageFiles.length} 个文件</span>
-              </>
+              </div>
             ) : (
-              <>
+              <div className="al-header-left">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="al-hdr-folder-icon">
                   <rect x="3" y="5" width="18" height="14" rx="2"/>
                   <line x1="3" y1="9" x2="21" y2="9"/>
                 </svg>
                 <span className="al-hdr-title">资产库</span>
                 <span className="al-hdr-count">· {folders.length} 个文件夹</span>
-              </>
+              </div>
             )}
           </div>
 
@@ -299,10 +330,9 @@ export default function AssetLibrary({ onClose }: Props) {
           )}
 
           <div className="al-header-right">
-            <button className="al-hdr-close-btn" onClick={onClose}>
+            <button className="al-hdr-close-btn" onClick={view === 'folder' ? goBack : onClose}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
             </button>
           </div>

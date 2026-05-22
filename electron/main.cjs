@@ -155,7 +155,7 @@ async function startElectronServer() {
 
           if (url.startsWith('/api/gallery') || url.startsWith('/api/save-outputs') ||
               url.startsWith('/api/thumbnail') || url.startsWith('/api/config') ||
-              url.startsWith('/api/history')) {
+              url.startsWith('/api/history') || url.startsWith('/api/upload-input')) {
             return proxyRequest(req, res, 'localhost', BACKEND_PORT, false);
           }
 

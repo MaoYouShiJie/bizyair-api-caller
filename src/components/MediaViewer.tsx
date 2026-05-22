@@ -15,10 +15,17 @@ interface Props {
 export default function MediaViewer({ items, initialIndex, onClose }: Props) {
   const [index, setIndex] = useState(initialIndex);
   const item = items[index];
+  const isImage = item.type === 'image' || (!item.type && /\.(jpe?g|png|gif|webp|bmp|svg)/i.test(item.url));
+  const isVideo = item.type === 'video' || (!item.type && /\.(mp4|webm|mov|avi)/i.test(item.url));
+  const isAudio = item.type === 'audio' || (!item.type && /\.(mp3|wav|ogg|flac)/i.test(item.url));
+  const isText = item.type === 'text' || (!item.type && /\.(txt|json|csv|md|log|html|xml)/i.test(item.url));
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [isPanning, setIsPanning] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [textContent, setTextContent] = useState('');
+  const [textLoading, setTextLoading] = useState(false);
+  const [copyOk, setCopyOk] = useState(false);
   const zoomRef = useRef(1);
   const panRef = useRef({ x: 0, y: 0 });
   const baseZoomRef = useRef(1);
@@ -32,6 +39,15 @@ export default function MediaViewer({ items, initialIndex, onClose }: Props) {
     setLoaded(false);
     displaySizeRef.current = { w: 0, h: 0 };
   }, [index]);
+
+  useEffect(() => {
+    if (!isText) { setTextContent(''); return; }
+    setTextLoading(true);
+    fetch(item.url)
+      .then(r => r.ok ? r.text() : '')
+      .then(t => { setTextContent(t); setTextLoading(false); })
+      .catch(() => { setTextContent('(无法加载内容)'); setTextLoading(false); });
+  }, [item?.url, isText]);
 
   useEffect(() => {
     const el = overlayRef.current;
@@ -172,10 +188,6 @@ export default function MediaViewer({ items, initialIndex, onClose }: Props) {
 
   const onMouseUp = () => setIsPanning(false);
 
-  const isImage = item.type === 'image' || (!item.type && /\.(jpe?g|png|gif|webp|bmp|svg)/i.test(item.url));
-  const isVideo = item.type === 'video' || (!item.type && /\.(mp4|webm|mov|avi)/i.test(item.url));
-  const isAudio = item.type === 'audio' || (!item.type && /\.(mp3|wav|ogg|flac)/i.test(item.url));
-
   return (
     <div className="mv-overlay" ref={overlayRef} onClick={(e) => { e.stopPropagation(); onClose(); }}>
       <div className="mv-toolbar">
@@ -196,6 +208,15 @@ export default function MediaViewer({ items, initialIndex, onClose }: Props) {
               <button className="mv-btn" onClick={resetView} title="重置 (0)">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>
               </button>
+              <div className="mv-toolbar-divider" />
+            </>
+          )}
+          {isText && (
+            <>
+              <button className="mv-btn" onClick={async () => { try { await navigator.clipboard.writeText(textContent); setCopyOk(true); setTimeout(() => setCopyOk(false), 1500); } catch {} }} title="复制内容">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              </button>
+              {copyOk && <span className="mv-copy-ok">已复制</span>}
               <div className="mv-toolbar-divider" />
             </>
           )}
@@ -265,6 +286,10 @@ export default function MediaViewer({ items, initialIndex, onClose }: Props) {
         ) : isAudio ? (
           <div className="mv-audio-wrap" onClick={e => e.stopPropagation()}>
             <audio src={item.url} controls />
+          </div>
+        ) : isText ? (
+          <div className="mv-text-wrap" onClick={e => e.stopPropagation()}>
+            {textLoading ? <div className="mv-text-loading">加载中...</div> : <pre className="mv-text-content">{textContent}</pre>}
           </div>
         ) : (
           <div className="mv-media" onClick={e => e.stopPropagation()}>
