@@ -218,7 +218,7 @@ async function startBackend(userDataPath) {
   const ports = [BACKEND_PORT, BACKEND_PORT + 1, BACKEND_PORT + 2];
   for (const port of ports) {
     try {
-      const server = await mod.startServer({ userDataPath, port });
+      const server = await mod.startServer({ userDataPath, port, persistDir: app.getPath('userData') });
       BACKEND_PORT = port;
       return server;
     } catch (e) {

@@ -11,13 +11,16 @@ export async function loadApiKeyFromBackend(): Promise<string> {
       return data.apiKey;
     }
   } catch {}
-  localStorage.removeItem('bizyair_api_key');
-  _cachedKey = null;
+  const local = localStorage.getItem('bizyair_api_key');
+  if (local) { _cachedKey = local; return local; }
   return '';
 }
 
 function getApiKey(): string {
-  return _cachedKey || '';;
+  if (_cachedKey) return _cachedKey;
+  const local = localStorage.getItem('bizyair_api_key');
+  if (local) { _cachedKey = local; return local; }
+  return '';
 }
 
 export async function proxyFetch<T>(path: string, options?: RequestInit): Promise<T> {

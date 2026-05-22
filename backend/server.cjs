@@ -43,6 +43,7 @@ function startServer(options = {}) {
     if (options.userDataPath) dataDir = options.userDataPath;
     configPath = path.join(dataDir, 'config.json');
     historyPath = path.join(dataDir, 'history.json');
+    if (options.persistDir) persistHistoryPath = path.join(options.persistDir, 'history.json');
     const port = options.port || PORT;
     loadSettings();
     if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
@@ -362,18 +363,36 @@ app.get('/api/thumbnail', async (req, res) => {
 
 // === History routes ===
 let historyPath = path.join(dataDir, 'history.json');
+let persistHistoryPath = path.join(dataDir, 'history.json');
 
 function loadHistory() {
-  try {
-    if (fs.existsSync(historyPath)) {
-      return JSON.parse(fs.readFileSync(historyPath, 'utf8'));
+  const merge = {};
+  // 1) load from seed file (exe root) — user-placed, lower priority
+  const seed = loadHistoryFile(historyPath);
+  // 2) load from persistent storage — app-saved, higher priority (overwrites duplicates)
+  const persist = loadHistoryFile(persistHistoryPath);
+  // merge: persist wins on duplicate IDs
+  for (const ep of new Set([...Object.keys(seed), ...Object.keys(persist)])) {
+    const seen = new Set();
+    const merged = [];
+    // seed entries first, then persist entries (persist overwrites same ID)
+    for (const r of [...(seed[ep] || []), ...(persist[ep] || [])]) {
+      if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); }
     }
+    merge[ep] = merged;
+  }
+  return merge;
+}
+
+function loadHistoryFile(p) {
+  try {
+    if (fs.existsSync(p)) return JSON.parse(fs.readFileSync(p, 'utf8'));
   } catch {}
   return {};
 }
 
 function saveHistory(h) {
-  fs.writeFileSync(historyPath, JSON.stringify(h, null, 2), 'utf8');
+  fs.writeFileSync(persistHistoryPath, JSON.stringify(h, null, 2), 'utf8');
 }
 
 app.get('/api/history/:endpoint', (req, res) => {
