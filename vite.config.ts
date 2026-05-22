@@ -11,6 +11,7 @@ export default defineConfig({
       '/api/config': { target: 'http://localhost:3004', changeOrigin: true },
       '/api/history': { target: 'http://localhost:3004', changeOrigin: true },
       '/api/upload-input': { target: 'http://localhost:3004', changeOrigin: true },
+      '/api/balance': { target: 'http://localhost:3004', changeOrigin: true },
       '/输出': { target: 'http://localhost:3004', changeOrigin: true },
       '/%E8%BE%93%E5%87%BA': { target: 'http://localhost:3004', changeOrigin: true },
       '/api': { target: 'https://bizyair.cn', changeOrigin: true },

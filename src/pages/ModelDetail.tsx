@@ -571,7 +571,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                 if (v !== null && v !== undefined) varValues[p.variable_name] = String(v);
               });
               const totalPx = Number(formValues.width) * Number(formValues.height);
-              let bestRow = 0, bestScore = -1;
+              let bestRow = -1, bestScore = -1;
               for (let ri = 0; ri < pt.cells.length; ri++) {
                 let score = 0;
                 for (const cell of pt.cells[ri]) {
@@ -581,10 +581,11 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                     // Column not in form — skip
                     continue;
                   }
-                  // Check if cell value is a pixel-range expression like ">2560*1440" or "<=1920*1080"
-                  const isRange = /[<>]/.test(cell.value_str) && /\d+\s*\*\s*\d+/.test(cell.value_str);
-                  if (isRange && totalPx > 0) {
-                    const parts = cell.value_str.split('且').map(s => s.trim());
+                  const cv = cell.value_str.trim();
+                  // Pixel-range expression like ">2560*1440" or "<=1920*1080"
+                  const isPixelRange = /[<>]/.test(cv) && /\d+\s*\*\s*\d+/.test(cv);
+                  if (isPixelRange && totalPx > 0) {
+                    const parts = cv.split('且').map(s => s.trim());
                     if (parts.every(p => {
                       const m = p.match(/([<>]=?)\s*(\d+)\s*\*\s*(\d+)/);
                       if (!m) return false;
@@ -594,17 +595,66 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                            : op === '<' ? totalPx < threshold
                            : op === '<=' ? totalPx <= threshold : false;
                     })) score += 10;
-                  } else {
-                    // Direct string match against the corresponding form value
-                    if (cell.value_str.includes(fv) || fv.includes(cell.value_str)) {
-                      score += 10;
-                    }
+                    continue;
                   }
+                  // Numeric range "X-Y"
+                  const rangeMatch = cv.match(/^(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)$/);
+                  if (rangeMatch) {
+                    const fvNum = Number(fv);
+                    if (!isNaN(fvNum)) {
+                      const lo = Number(rangeMatch[1]), hi = Number(rangeMatch[2]);
+                      if (fvNum >= lo && fvNum <= hi) score += 10;
+                    }
+                    continue;
+                  }
+                  // Comparison ">X", ">=X", "<X", "<=X"
+                  const compMatch = cv.match(/^([<>]=?)\s*(\d+(?:\.\d+)?)$/);
+                  if (compMatch) {
+                    const fvNum = Number(fv);
+                    if (!isNaN(fvNum)) {
+                      const threshold = Number(compMatch[2]);
+                      const op = compMatch[1];
+                      if (op === '>' ? fvNum > threshold
+                        : op === '>=' ? fvNum >= threshold
+                        : op === '<' ? fvNum < threshold
+                        : op === '<=' ? fvNum <= threshold : false) score += 10;
+                    }
+                    continue;
+                  }
+                  // Exact numeric match
+                  const fvNum = Number(fv);
+                  const cvNum = Number(cv);
+                  if (!isNaN(fvNum) && !isNaN(cvNum) && fvNum === cvNum) {
+                    score += 10;
+                    continue;
+                  }
+                  // Fallback: exact string match
+                  if (cv === fv) score += 10;
                 }
                 if (score > bestScore) { bestScore = score; bestRow = ri; }
               }
-              const pc = pt.cells[bestRow].find(c => c.variable_name === 'price');
-              if (pc) { priceNum = Number(pc.value_str) || pc.amount; priceUnit = pc.unit_name || '次'; }
+              if (bestRow >= 0) {
+                const pc = pt.cells[bestRow].find(c => c.variable_name === 'price');
+                if (pc) { priceNum = Number(pc.value_str) || pc.amount; priceUnit = pc.unit_name || '次'; }
+              }
+            }
+
+            // 4) Multiply price_table result by billing_dim value (e.g. duration × unit_price)
+            if (priceNum && !hasBilling) {
+              let dimValue: number | undefined;
+              detail.input_params?.forEach(p => {
+                if (!p.billing_dim) return;
+                const v = formValues[p.field_name];
+                if (v === null || v === undefined) return;
+                const n = Number(v);
+                if (!isNaN(n) && n > 0) {
+                  dimValue = dimValue === undefined ? n : dimValue * n;
+                }
+              });
+              if (dimValue !== undefined) {
+                priceNum = priceNum * dimValue;
+                priceUnit = '';
+              }
             }
 
             // 5) Fallback: detail billing_price

@@ -935,6 +935,7 @@ button { cursor: pointer; font-family: inherit; }
 .modal-actions { display: flex; gap: 12px; justify-content: flex-end; }
 
 .balance-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+.balance-error { color: #f87171; font-size: 13px; margin: 0; width: 100%; }
 .balance-query-btn { font-size: 13px; padding: 6px 14px; white-space: nowrap; }
 .balance-display { display: flex; gap: 12px; }
 .balance-item { display: flex; align-items: center; gap: 4px; background: rgba(255,255,255,.05); padding: 4px 10px; border-radius: 6px; }

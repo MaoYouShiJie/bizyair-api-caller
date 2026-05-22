@@ -17,9 +17,11 @@ export default function ApiKeySettings({ open, onClose }: Props) {
   const [saved, setSaved] = useState(false);
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
+  const [balanceError, setBalanceError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!open) return;
+    setBalanceError(null);
     const k = localStorage.getItem('bizyair_api_key');
     setKey(k || '');
     if (k) queryBalance(k);
@@ -29,11 +31,19 @@ export default function ApiKeySettings({ open, onClose }: Props) {
   const queryBalance = async (apiKey: string) => {
     setBalanceLoading(true);
     setBalance(null);
+    setBalanceError(null);
     try {
       const res = await fetch(`/api/balance?key=${encodeURIComponent(apiKey)}`);
       const json = await res.json();
-      if (json.success) setBalance(json.data?.data || null);
-    } catch {}
+      if (json.success) {
+        setBalance(json.data?.data || null);
+      } else {
+        setBalanceError(json.error || '查询失败');
+      }
+    } catch (e) {
+      console.error('Balance query error:', e);
+      setBalanceError(e instanceof Error ? e.message : '网络错误');
+    }
     setBalanceLoading(false);
   };
 
@@ -97,6 +107,7 @@ export default function ApiKeySettings({ open, onClose }: Props) {
                 </span>
               </div>
             )}
+            {balanceError && <p className="balance-error">{balanceError}</p>}
           </div>
         )}
         <div className="modal-actions">
