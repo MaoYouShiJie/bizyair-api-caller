@@ -2,7 +2,7 @@
   <img src="public/logo002.png" width="200" alt="BizyAir API 工具" />
 </p>
 
-<h1 align="center">BizyAir Model Inference</h1>
+<h1 align="center">BizyAir Model Inference <sup><code>v0.0.1</code></sup></h1>
 
 <p align="center">
   <a href="README.md">🇨🇳 中文</a>
