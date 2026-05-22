@@ -2,7 +2,7 @@
   <img src="logo.png" width="120" alt="BizyAir Model Inference" />
 </p>
 
-<h1 align="center">🚀 BizyAir Model Inference</h1>
+<h1 align="center">BizyAir Model Inference</h1>
 
 <p align="center">
   <a href="README.md">🇨🇳 中文</a>
@@ -23,7 +23,7 @@
 
 ---
 
-## <img src="icon.png" width="28" height="28" alt="" style="vertical-align:-6px;margin-right:4px"> About BizyAir.cn
+## <img src="logo.png" width="28" height="28" alt="" style="vertical-align:-6px;margin-right:4px"> About BizyAir.cn
 
 **[BizyAir.cn](https://bizyair.cn)** — A ready-to-use cloud AI creation space powered by ComfyUI, operated by Beijing SiliconFlow Technology Co., Ltd. It seamlessly connects cloud GPU resources with local ComfyUI, solving the problem of insufficient local computing power. Built-in with numerous curated models and nodes, ready to use out of the box with no complex configuration required.
 

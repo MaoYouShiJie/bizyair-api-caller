@@ -2,7 +2,7 @@
   <img src="logo.png" width="120" alt="BizyAir 模型调用" />
 </p>
 
-<h1 align="center">🚀 BizyAir 模型调用</h1>
+<h1 align="center">BizyAir 模型调用</h1>
 
 <p align="center">
   <a href="README_EN.md">🇺🇸 English</a>
@@ -23,7 +23,7 @@
 
 ---
 
-## <img src="icon.png" width="28" height="28" alt="" style="vertical-align:-6px;margin-right:4px"> 关于 BizyAir.cn
+## <img src="logo.png" width="28" height="28" alt="" style="vertical-align:-6px;margin-right:4px"> 关于 BizyAir.cn
 
 **[BizyAir.cn](https://bizyair.cn)** — 基于 ComfyUI 的即开即用云端 AI 创作空间，由北京硅基流动科技有限公司（SiliconFlow）运营。它将云端 GPU 资源与本地 ComfyUI 无缝连接，解决本地算力不足问题，内置众多精选模型与节点，无需复杂配置，开箱即用。
 
