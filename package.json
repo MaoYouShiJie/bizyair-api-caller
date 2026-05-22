@@ -27,7 +27,7 @@
       "icon.png"
     ],
     "win": {
-      "target": "portable",
+      "target": ["portable", "dir"],
       "icon": "icon.png"
     }
   },
