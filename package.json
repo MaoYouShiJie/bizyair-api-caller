@@ -24,8 +24,7 @@
       "dist/**/*",
       "electron/**/*",
       "backend/**/*",
-      "icon.png",
-      "config.json"
+      "icon.png"
     ],
     "win": {
       "target": "nsis",

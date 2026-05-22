@@ -42,6 +42,7 @@ function startServer(options = {}) {
   return new Promise((resolve, reject) => {
     if (options.userDataPath) dataDir = options.userDataPath;
     configPath = path.join(dataDir, 'config.json');
+    historyPath = path.join(dataDir, 'history.json');
     const port = options.port || PORT;
     loadSettings();
     if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
@@ -360,7 +361,7 @@ app.get('/api/thumbnail', async (req, res) => {
 });
 
 // === History routes ===
-const historyPath = path.join(dataDir, 'history.json');
+let historyPath = path.join(dataDir, 'history.json');
 
 function loadHistory() {
   try {
