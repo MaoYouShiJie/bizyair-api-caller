@@ -27,7 +27,7 @@
       "icon.png"
     ],
     "win": {
-      "target": "nsis",
+      "target": "portable",
       "icon": "icon.png"
     }
   },
