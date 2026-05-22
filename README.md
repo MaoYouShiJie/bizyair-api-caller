@@ -7,6 +7,18 @@
 
 ---
 
+## <img src="icon.png" width="24" height="24" alt="" style="vertical-align:middle;margin-right:4px"> 关于 BizyAir.cn / About BizyAir.cn
+
+**BizyAir.cn** — 基于 ComfyUI 的即开即用云端 AI 创作空间，由北京硅基流动科技有限公司（SiliconFlow）运营。它将云端 GPU 资源与本地 ComfyUI 无缝连接，解决本地算力不足问题，内置众多精选模型与节点，无需复杂配置，开箱即用。
+
+**BizyAir.cn** — A ready-to-use cloud AI creation space powered by ComfyUI, operated by Beijing SiliconFlow Technology Co., Ltd. It seamlessly connects cloud GPU resources with local ComfyUI, solving the problem of insufficient local computing power. Built-in with numerous curated models and nodes, ready to use out of the box with no complex configuration required.
+
+> 官网 / Website: [https://bizyair.cn](https://bizyair.cn)
+>
+> 文档中心 / Docs: [https://docs.bizyair.cn](https://docs.bizyair.cn)
+
+---
+
 ## 功能特性 / Features
 
 - **模型市场浏览** / **Model Zoo** — 浏览 BizyAir 模型列表，按分类/标签筛选，搜索模型
