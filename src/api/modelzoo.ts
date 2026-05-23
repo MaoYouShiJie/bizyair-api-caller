@@ -15,34 +15,34 @@ async function apiGet<T>(path: string): Promise<{ code: number; data: T; message
   return res.json();
 }
 
-export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
-  const candidates = [endpoint];
+function* endpointCandidates(endpoint: string): Generator<string> {
+  yield endpoint;
   const parts = endpoint.split('/');
   const modelName = parts[0];
   const suffix = parts.slice(1).join('/');
-  // model name only
-  if (modelName && modelName !== endpoint) candidates.push(modelName);
-  // try with -base suffix (catalog may have stale name)
-  if (suffix && !modelName.endsWith('-base')) candidates.push(`${modelName}-base/${suffix}`);
-  // deduplicate
-  const seen = new Set<string>();
-  for (const ep of candidates) {
-    if (seen.has(ep)) continue; seen.add(ep);
+  if (modelName && modelName !== endpoint) yield modelName;
+  if (suffix && !modelName.endsWith('-base')) yield `${modelName}-base/${suffix}`;
+}
+
+async function resolveEndpoint(pathPrefix: string, endpoint: string): Promise<{ endpoint: string; data: any } | null> {
+  for (const ep of endpointCandidates(endpoint)) {
     try {
-      const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${ep}`);
-      if (r.code === 20000) return r.data;
-    } catch { /* try next candidate */ }
+      const r = await apiGet<any>(`${pathPrefix}${ep}`);
+      if (r.code === 20000) return { endpoint: ep, data: r.data };
+    } catch { /* try next */ }
   }
-  throw new Error(`请求失败 (404)`);
+  return null;
+}
+
+export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
+  const result = await resolveEndpoint('/x/v1/modelzoo/detail/', endpoint);
+  if (!result) throw new Error(`请求失败 (404)`);
+  return result.data;
 }
 
 export async function fetchModelPrice(endpoint: string): Promise<ModelPrice | null> {
-  try {
-    const res = await fetch(`/x/v1/modelzoo/price_table/${endpoint}`, { headers: authHeaders() });
-    if (!res.ok) return null;
-    const json = await res.json();
-    return json.data || null;
-  } catch { return null; }
+  const result = await resolveEndpoint('/x/v1/modelzoo/price_table/', endpoint);
+  return result?.data || null;
 }
 
 export async function createTask(endpoint: string, inputValues: Record<string, unknown>) {
