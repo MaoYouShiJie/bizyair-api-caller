@@ -689,8 +689,25 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
             <button className={`rpt-tab ${resultTab === 'history' ? 'active' : ''}`} onClick={() => { setResultTab('history'); loadHistory(endpoint).then(r => setHistoryRecords(r)).catch(() => {}); }}>历史记录</button>
           </div>
 
-          {resultTab === 'history' ? (
-            historyRecords.length === 0 ? (
+          <div className="result-panel-body" style={{ display: resultTab === 'history' ? 'none' : '' }}>
+            {taskCardKeys.map(id => (
+              <TaskCard
+                key={id}
+                detail={detail}
+                endpoint={endpoint}
+                formValues={formValues}
+                onRemove={() => setTaskCardKeys(prev => prev.filter(k => k !== id))}
+                onViewMedia={(items, index) => { setViewerItems(items as { url: string; name?: string; type?: string }[]); setViewerIndex(index); }}
+              />
+            ))}
+            {taskCardKeys.length === 0 && (
+              <div className="result-placeholder">
+                <p>填写参数后点击「调用模型」开始运行</p>
+              </div>
+            )}
+          </div>
+          <div className="result-panel-body" style={{ display: resultTab === 'history' ? '' : 'none' }}>
+            {historyRecords.length === 0 ? (
               <div className="result-placeholder"><p>暂无历史记录</p></div>
             ) : selectedDate ? (
               <div className="history-open-view">
@@ -790,26 +807,8 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                   );
                 })}
               </div>
-            )
-          ) : (
-            <>
-              {taskCardKeys.map(id => (
-                <TaskCard
-                  key={id}
-                  detail={detail}
-                  endpoint={endpoint}
-                  formValues={formValues}
-                  onRemove={() => setTaskCardKeys(prev => prev.filter(k => k !== id))}
-                  onViewMedia={(items, index) => { setViewerItems(items as { url: string; name?: string; type?: string }[]); setViewerIndex(index); }}
-                />
-              ))}
-              {taskCardKeys.length === 0 && (
-                <div className="result-placeholder">
-                  <p>填写参数后点击「调用模型」开始运行</p>
-                </div>
-              )}
-            </>
-          )}
+            )}
+          </div>
         </div>
       </div>
       )}
