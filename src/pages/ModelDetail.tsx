@@ -377,7 +377,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
       return;
     }
     const id = ++nextCardId.current;
-    setTaskCardKeys(prev => [...prev, id]);
+    setTaskCardKeys(prev => [id, ...prev]);
   }, [detail]);
 
   const updateValue = (name: string, val: unknown) => {
