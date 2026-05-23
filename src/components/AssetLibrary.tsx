@@ -7,7 +7,7 @@ interface Props {
   onClose: () => void;
 }
 
-type View = 'root' | 'folder';
+type View = 'root' | 'folder' | 'date';
 
 function getThumbUrl(filePath: string): string {
   if (!filePath) return '';
@@ -179,6 +179,8 @@ export default function AssetLibrary({ onClose }: Props) {
   const [folders, setFolders] = useState<AssetFolder[]>([]);
   const [files, setFiles] = useState<AssetFile[]>([]);
   const [currentFolder, setCurrentFolder] = useState('');
+  const [currentDate, setCurrentDate] = useState('');
+  const [currentDateFiles, setCurrentDateFiles] = useState<AssetFile[]>([]);
   const [loading, setLoading] = useState(true);
   const [savePath, setSavePath] = useState(getSavePath());
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
@@ -211,6 +213,24 @@ export default function AssetLibrary({ onClose }: Props) {
     });
   }, []);
 
+  const dateGroups = useMemo(() => {
+    const groups: Record<string, AssetFile[]> = {};
+    for (const f of files) {
+      const d = f.date || '未分类';
+      if (!groups[d]) groups[d] = [];
+      groups[d].push(f);
+    }
+    return groups;
+  }, [files]);
+
+  const dateFolders: AssetFolder[] = useMemo(() => {
+    return Object.entries(dateGroups).map(([date, df]) => ({
+      name: date,
+      fileCount: df.length,
+      covers: df.slice(0, 3).map(f => ({ path: f.path, type: f.type, preview: f.preview })),
+    }));
+  }, [dateGroups]);
+
   const openFolder = async (name: string) => {
     if (folderCacheRef.current[name]) {
       setFiles(folderCacheRef.current[name]);
@@ -227,18 +247,33 @@ export default function AssetLibrary({ onClose }: Props) {
     setLoading(false);
   };
 
+  const openDate = (date: string) => {
+    setCurrentDate(date);
+    setCurrentDateFiles(dateGroups[date] || []);
+    setView('date');
+  };
+
   const goBack = () => {
-    setView('root');
-    setCurrentFolder('');
-    foldersLoadedRef.current = false;
-    loadContents();
+    if (view === 'date') {
+      setView('folder');
+      setCurrentDate('');
+      setCurrentDateFiles([]);
+    } else {
+      setView('root');
+      setCurrentFolder('');
+      setCurrentDate('');
+      setCurrentDateFiles([]);
+      foldersLoadedRef.current = false;
+      loadContents();
+    }
   };
 
   const handleDelete = async (file: AssetFile) => {
     if (!confirm(`确定删除 "${file.name}"？`)) return false;
     const ok = await deleteFile(file.path);
     if (ok) {
-      setFiles(prev => prev.filter(f => f.name !== file.name));
+      setFiles(prev => prev.filter(f => f.path !== file.path));
+      if (view === 'date') setCurrentDateFiles(prev => prev.filter(f => f.path !== file.path));
       if (currentFolder) delete folderCacheRef.current[currentFolder];
     }
     return ok;
@@ -268,31 +303,37 @@ export default function AssetLibrary({ onClose }: Props) {
     setShowDirModal(false);
   };
 
+  const visibleFiles = useMemo(() => {
+    const source = view === 'date' ? currentDateFiles : [];
+    return source.filter(f => {
+      const t = getMediaType(f);
+      return t === 'image' || t === 'video' || t === 'audio' || t === 'text';
+    });
+  }, [view, currentDateFiles]);
+
   const viewerItems = useMemo(() => {
-    if (view !== 'folder') return [];
-    return files.map(f => ({
+    if (view !== 'date') return [];
+    return visibleFiles.map(f => ({
       url: f.url,
       name: f.name,
       type: getMediaType(f) as 'image' | 'video' | 'audio' | 'text',
     }));
-  }, [files, view]);
-
-  const imageFiles = useMemo(() => {
-    return files.filter(f => {
-      const t = getMediaType(f);
-      return t === 'image' || t === 'video' || t === 'audio' || t === 'text';
-    });
-  }, [files]);
+  }, [visibleFiles, view]);
 
   return (
     <div className="al-overlay" onClick={onClose}>
       <div className="al-panel" onClick={e => e.stopPropagation()}>
         <div className="al-header-bar">
           <div className="al-header-left">
-            {view === 'folder' ? (
+            {view === 'date' ? (
+              <div className="al-header-left">
+                <span className="al-hdr-title">{currentDate}</span>
+                <span className="al-hdr-count">· {visibleFiles.length} 个文件</span>
+              </div>
+            ) : view === 'folder' ? (
               <div className="al-header-left">
                 <span className="al-hdr-title">{currentFolder}</span>
-                <span className="al-hdr-count">· {imageFiles.length} 个文件</span>
+                <span className="al-hdr-count">· {dateFolders.length} 个日期</span>
               </div>
             ) : (
               <div className="al-header-left">
@@ -331,7 +372,7 @@ export default function AssetLibrary({ onClose }: Props) {
           )}
 
           <div className="al-header-right">
-            <button className="al-hdr-close-btn" onClick={view === 'folder' ? goBack : onClose}>
+            <button className="al-hdr-close-btn" onClick={view !== 'root' ? goBack : onClose}>
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
@@ -360,14 +401,29 @@ export default function AssetLibrary({ onClose }: Props) {
                 ))}
               </div>
             )
-          ) : (
-            imageFiles.length === 0 ? (
+          ) : view === 'folder' ? (
+            dateFolders.length === 0 ? (
               <div className="al-empty">
                 <p>此文件夹为空</p>
               </div>
             ) : (
+              <div className="al-folder-grid">
+                {dateFolders.map(d => (
+                  <div key={d.name} className="al-folder-item">
+                    <StackedFolder folder={d} onClick={() => openDate(d.name)} />
+                    <div className="al-folder-item-label">{d.name}</div>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : (
+            visibleFiles.length === 0 ? (
+              <div className="al-empty">
+                <p>此日期无文件</p>
+              </div>
+            ) : (
               <div className="al-file-grid">
-                {imageFiles.map((f, i) => (
+                {visibleFiles.map((f, i) => (
                   <MediaThumb
                     key={f.path}
                     file={f}
@@ -386,7 +442,7 @@ export default function AssetLibrary({ onClose }: Props) {
           initialIndex={viewerIndex}
           onClose={() => setViewerIndex(null)}
           onDelete={(url) => {
-            const file = files.find(f => f.url === url);
+            const file = (view === 'date' ? currentDateFiles : files).find(f => f.url === url);
             if (file) handleDelete(file).then(ok => ok && setViewerIndex(null));
           }}
         />
