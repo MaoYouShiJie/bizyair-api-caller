@@ -16,19 +16,24 @@ async function apiGet<T>(path: string): Promise<{ code: number; data: T; message
 }
 
 export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
-  try {
-    const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${endpoint}`);
-    if (r.code !== 20000) throw new Error(r.message || '请求失败');
-    return r.data;
-  } catch (e) {
-    const modelName = endpoint.split('/')[0];
-    if (modelName && modelName !== endpoint) {
-      const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${modelName}`);
-      if (r.code !== 20000) throw new Error(r.message || '请求失败');
-      return r.data;
-    }
-    throw e;
+  const candidates = [endpoint];
+  const parts = endpoint.split('/');
+  const modelName = parts[0];
+  const suffix = parts.slice(1).join('/');
+  // model name only
+  if (modelName && modelName !== endpoint) candidates.push(modelName);
+  // try with -base suffix (catalog may have stale name)
+  if (suffix && !modelName.endsWith('-base')) candidates.push(`${modelName}-base/${suffix}`);
+  // deduplicate
+  const seen = new Set<string>();
+  for (const ep of candidates) {
+    if (seen.has(ep)) continue; seen.add(ep);
+    try {
+      const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${ep}`);
+      if (r.code === 20000) return r.data;
+    } catch { /* try next candidate */ }
   }
+  throw new Error(`请求失败 (404)`);
 }
 
 export async function fetchModelPrice(endpoint: string): Promise<ModelPrice | null> {
