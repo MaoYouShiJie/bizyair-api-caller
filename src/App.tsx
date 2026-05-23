@@ -27,8 +27,7 @@ export default function App() {
             <Route path="/" element={<Home onOpenSettings={() => setSettingsOpen(true)} onOpenAssetLibrary={() => setAssetLibOpen(true)} />} />
             <Route path="/pc/modelzoo" element={<Navigate to="/" replace />} />
             <Route path="/pc/modelzoo/*" element={<PcModelzooRedirect />} />
-            <Route path="/model/:modelName/:endpointSuffix" element={<ModelDetailPage onOpenSettings={() => setSettingsOpen(true)} onOpenAssetLibrary={() => setAssetLibOpen(true)} />} />
-            <Route path="/model/:modelName" element={<ModelDetailPage onOpenSettings={() => setSettingsOpen(true)} onOpenAssetLibrary={() => setAssetLibOpen(true)} />} />
+            <Route path="/model/*" element={<ModelDetailPage onOpenSettings={() => setSettingsOpen(true)} onOpenAssetLibrary={() => setAssetLibOpen(true)} />} />
           </Routes>
         </main>
         <ApiKeySettings open={settingsOpen} onClose={() => setSettingsOpen(false)} />

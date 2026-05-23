@@ -247,7 +247,7 @@ export default function Home({ onOpenSettings, onOpenAssetLibrary }: { onOpenSet
                   {models.map(model => (
                     <Link
                       key={model.id}
-                      to={`/model/${model.model_name}/${model.endpoint.split('/').slice(1).join('/')}`}
+                      to={`/model/${model.endpoint}`}
                       className="model-card"
                     >
                       <div className="model-card-img">
@@ -270,7 +270,7 @@ export default function Home({ onOpenSettings, onOpenAssetLibrary }: { onOpenSet
                   {models.map(model => (
                     <Link
                       key={model.id}
-                      to={`/model/${model.model_name}/${model.endpoint.split('/').slice(1).join('/')}`}
+                      to={`/model/${model.endpoint}`}
                       className="model-list-card"
                     >
                       <div className="model-list-thumb">

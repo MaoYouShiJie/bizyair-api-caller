@@ -279,8 +279,8 @@ function InputRenderer({ param, value, onChange }: {
 }
 
 export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: { onOpenSettings?: () => void; onOpenAssetLibrary?: () => void }) {
-  const { modelName, endpointSuffix } = useParams();
-  const endpoint = `${modelName}/${endpointSuffix}`;
+  const { '*': endpointPath, modelName, endpointSuffix } = useParams();
+  const endpoint = endpointPath || (modelName && endpointSuffix ? `${modelName}/${endpointSuffix}` : modelName || '');
 
   const [detail, setDetail] = useState<ModelDetail | null>(null);
   const [formValues, setFormValues] = useState<Record<string, unknown>>({});
