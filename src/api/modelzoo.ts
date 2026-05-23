@@ -1,4 +1,3 @@
-import { proxyFetch } from './client';
 import type { ModelDetail, ModelPrice } from '../types';
 
 function getApiKey(): string {
@@ -11,13 +10,16 @@ function authHeaders(): Record<string, string> {
 }
 
 export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
-  return proxyFetch<{ code: number; data: ModelDetail }>(`/x/v1/modelzoo/detail/${endpoint}`)
-    .then(r => r.data);
+  const res = await fetch(`/x/v1/modelzoo/detail/${endpoint}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error(`请求失败 (${res.status})`);
+  const data = await res.json();
+  if (data.code !== 20000) throw new Error(data.message || '请求失败');
+  return data.data;
 }
 
 export async function fetchModelPrice(endpoint: string): Promise<ModelPrice | null> {
   try {
-    const res = await fetch(`/api/x/v1/modelzoo/price_table/${endpoint}`);
+    const res = await fetch(`/x/v1/modelzoo/price_table/${endpoint}`, { headers: authHeaders() });
     if (!res.ok) return null;
     const json = await res.json();
     return json.data || null;
