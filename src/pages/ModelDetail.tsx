@@ -156,6 +156,7 @@ function InputRenderer({ param, value, onChange }: {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('name', file.name);
+      formData.append('api_key', localStorage.getItem('bizyair_api_key') || '');
       fetch('/api/upload-input', { method: 'POST', body: formData })
         .then(r => r.json())
         .then(d => {

@@ -527,7 +527,7 @@ app.get('/api/balance', async (req, res) => {
 app.post('/api/upload-input', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const apiKey = getApiKey();
+    const apiKey = req.body.api_key || getApiKey();
     if (!apiKey) return res.status(400).json({ error: 'API Key not configured' });
 
     const fileName = req.body.name || req.file.originalname;
