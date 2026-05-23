@@ -345,7 +345,13 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
         setDetail(data);
         const dv: Record<string, unknown> = {};
         data.input_params?.forEach(p => {
-          if (p.field_value !== undefined && p.field_value !== null) {
+          const isWatermark = p.field_type === 'boolean' && (
+            p.field_name.toLowerCase().includes('watermark') || p.field_name.toLowerCase().includes('water_mark') ||
+            p.field_name.includes('水印') || p.field_label.includes('水印')
+          );
+          if (isWatermark) {
+            dv[p.field_name] = false;
+          } else if (p.field_value !== undefined && p.field_value !== null) {
             dv[p.field_name] = p.field_value;
           }
         });
