@@ -9,12 +9,26 @@ function authHeaders(): Record<string, string> {
   return key ? { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
 }
 
-export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
-  const res = await fetch(`/x/v1/modelzoo/detail/${endpoint}`, { headers: authHeaders() });
+async function apiGet<T>(path: string): Promise<{ code: number; data: T; message?: string }> {
+  const res = await fetch(path, { headers: authHeaders() });
   if (!res.ok) throw new Error(`请求失败 (${res.status})`);
-  const data = await res.json();
-  if (data.code !== 20000) throw new Error(data.message || '请求失败');
-  return data.data;
+  return res.json();
+}
+
+export async function fetchModelDetail(endpoint: string): Promise<ModelDetail> {
+  try {
+    const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${endpoint}`);
+    if (r.code !== 20000) throw new Error(r.message || '请求失败');
+    return r.data;
+  } catch (e) {
+    const modelName = endpoint.split('/')[0];
+    if (modelName && modelName !== endpoint) {
+      const r = await apiGet<ModelDetail>(`/x/v1/modelzoo/detail/${modelName}`);
+      if (r.code !== 20000) throw new Error(r.message || '请求失败');
+      return r.data;
+    }
+    throw e;
+  }
 }
 
 export async function fetchModelPrice(endpoint: string): Promise<ModelPrice | null> {
