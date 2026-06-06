@@ -734,7 +734,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                         .map(([, v]) => v).join(' | ');
                       const urls = Object.values(rec.outputs).flat();
                       for (const url of urls) {
-                        const isText = !/^https?:\/\//i.test(url);
+                        const isText = !/^(https?:\/\/|\/)/i.test(url);
                         allItems.push({ url, prompt, rec, isVideo: !isText && /\.(mp4|webm|mov|avi|mkv)$/i.test(url), isAudio: !isText && /\.(mp3|wav|ogg|m4a|flac|aac|wma)$/i.test(url), isText });
                       }
                     }
@@ -762,7 +762,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                 {Object.entries(groupByDate(historyRecords)).map(([date, items]) => {
                   const allCovers = items.flatMap(r => Object.values(r.outputs).flat()).filter(u => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov|avi|mkv)$/i.test(u));
                   const covers = allCovers.slice(0, 3).reverse();
-                  const hasTextOnly = covers.length === 0 && items.some(r => Object.values(r.outputs).flat().some(u => !/^https?:\/\//i.test(u)));
+                  const hasTextOnly = covers.length === 0 && items.some(r => Object.values(r.outputs).flat().some(u => !/^(https?:\/\/|\/)/i.test(u)));
                   return (
                     <div key={date} className="al-folder-item">
                         {hasTextOnly ? (
@@ -775,7 +775,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                                     <div className="al-stacked-layer-inner" style={{ overflow: 'visible' }}>
                                       <div style={{width:'100%',height:'100%',display:'flex',alignItems:'center',justifyContent:'center'}}>
                                         <div className="al-thumb-text al-thumb-text-preview" style={{width:'100%',height:'85%',borderRadius:'12px',flexShrink:0,boxShadow:'inset 0 0 8px 3px rgba(0,0,0,.6)'}}>
-                                          <span className="al-thumb-text-preview-content">{(Object.values(items[0]?.outputs || {}).flat().find(u => !/^https?:\/\//i.test(u)) || '文本').slice(0, 200)}</span>
+                                          <span className="al-thumb-text-preview-content">{(Object.values(items[0]?.outputs || {}).flat().find(u => !/^(https?:\/\/|\/)/i.test(u)) || '文本').slice(0, 200)}</span>
                                         </div>
                                       </div>
                                     </div>
