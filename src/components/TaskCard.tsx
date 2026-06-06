@@ -82,15 +82,22 @@ export default function TaskCard({ detail, endpoint, formValues, onRemove, onVie
           if (data.status === 'Success') {
             setOutputs(data.outputs || null);
             setTaskResponse(data as Record<string, unknown>);
-            saveHistory(endpoint, formValues, data.outputs || {}, tid).catch(() => {});
-            if (data.outputs) {
+
+            const out = data.outputs || {};
+            let historyOutputs = out;
+            if (Object.keys(out).length) {
               setSaveStatus('正在保存...');
-              saveOutputs(data.outputs, detail.display_name).then(n => {
-                if (!cancelledRef.current) setSaveStatus(n > 0 ? `已保存 ${n} 个文件` : '');
-              }).catch(() => {
+              try {
+                const result = await saveOutputs(out, detail.display_name);
+                if (!cancelledRef.current) {
+                  setSaveStatus(result.saved > 0 ? `已保存 ${result.saved} 个文件` : '');
+                  historyOutputs = result.localOutputs;
+                }
+              } catch {
                 if (!cancelledRef.current) setSaveStatus('保存失败');
-              });
+              }
             }
+            saveHistory(endpoint, formValues, historyOutputs, tid).catch(() => {});
             break;
           }
           if (data.status === 'Failed') {

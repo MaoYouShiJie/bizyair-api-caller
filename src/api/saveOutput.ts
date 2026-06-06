@@ -19,7 +19,7 @@ export async function pickSaveDir(): Promise<string | null> {
   return null;
 }
 
-export async function saveOutputs(outputs: Record<string, string[]>, modelName: string): Promise<number> {
+export async function saveOutputs(outputs: Record<string, string[]>, modelName: string): Promise<{ saved: number; localOutputs: Record<string, string[]> }> {
   try {
     const res = await fetch('/api/save-outputs', {
       method: 'POST',
@@ -27,9 +27,20 @@ export async function saveOutputs(outputs: Record<string, string[]>, modelName: 
       body: JSON.stringify({ outputs, app_name: modelName }),
     });
     const data = await res.json();
-    return data.saved || 0;
+    const localOutputs: Record<string, string[]> = {};
+    if (data.results) {
+      let idx = 0;
+      for (const [key, urls] of Object.entries(outputs)) {
+        localOutputs[key] = [];
+        for (const url of urls) {
+          localOutputs[key].push(data.results[idx]?.success && data.results[idx]?.url ? data.results[idx].url : url);
+          idx++;
+        }
+      }
+    }
+    return { saved: data.saved || 0, localOutputs: Object.keys(localOutputs).length ? localOutputs : outputs };
   } catch {
-    return 0;
+    return { saved: 0, localOutputs: outputs };
   }
 }
 
