@@ -333,7 +333,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
     else setSearchParams({});
     if (tab === 'history' && endpoint) {
       setHistoryLoading(true);
-      loadHistory(endpoint).then(r => setHistoryRecords(r)).catch(() => {}).finally(() => setHistoryLoading(false));
+      loadHistory(endpoint, detail?.display_name).then(r => setHistoryRecords(r)).catch(() => {}).finally(() => setHistoryLoading(false));
     }
   };
 
@@ -695,7 +695,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
         <div className="result-panel">
           <div className="result-panel-tabs">
             <button className={`rpt-tab ${resultTab === 'output' ? 'active' : ''}`} onClick={() => setResultTab('output')}>生成结果</button>
-            <button className={`rpt-tab ${resultTab === 'history' ? 'active' : ''}`} onClick={() => { setResultTab('history'); loadHistory(endpoint).then(r => setHistoryRecords(r)).catch(() => {}); }}>历史记录</button>
+            <button className={`rpt-tab ${resultTab === 'history' ? 'active' : ''}`} onClick={() => { setResultTab('history'); loadHistory(endpoint, detail?.display_name).then(r => setHistoryRecords(r)).catch(() => {}); }}>历史记录</button>
           </div>
 
           <div className="result-panel-body" style={{ display: resultTab === 'history' ? 'none' : '' }}>

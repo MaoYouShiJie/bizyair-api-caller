@@ -17,8 +17,10 @@ export interface HistoryRecord {
   timestamp: string;
 }
 
-export async function loadHistory(endpoint: string): Promise<HistoryRecord[]> {
-  const data = await api(`/api/history/${encodeURIComponent(endpoint)}`);
+export async function loadHistory(endpoint: string, displayName?: string): Promise<HistoryRecord[]> {
+  let path = `/api/history/${encodeURIComponent(endpoint)}`;
+  if (displayName) path += `?display_name=${encodeURIComponent(displayName)}`;
+  const data = await api(path);
   return data.records || [];
 }
 

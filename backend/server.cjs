@@ -398,8 +398,46 @@ function saveHistory(h) {
 app.get('/api/history/:endpoint', (req, res) => {
   try {
     const ep = req.params.endpoint;
+    const displayName = req.query.display_name;
     const h = loadHistory();
-    res.json({ records: h[ep] || [] });
+    const records = h[ep] || [];
+
+    if (displayName && saveDir) {
+      const allByDate = {};
+      for (const rec of records) {
+        const date = rec.timestamp ? rec.timestamp.slice(0, 10) : '';
+        if (!date) continue;
+        if (!allByDate[date]) allByDate[date] = [];
+        allByDate[date].push(rec);
+      }
+      for (const [date, recs] of Object.entries(allByDate)) {
+        const dayDir = path.join(saveDir, displayName, date);
+        if (!fs.existsSync(dayDir)) continue;
+        const entries = fs.readdirSync(dayDir, { withFileTypes: true })
+          .filter(d => d.isFile())
+          .map(d => d.name)
+          .filter(f => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov|avi|mkv|mp3|wav|ogg)$/i.test(f))
+          .sort();
+        let fileIdx = 0;
+        for (const rec of recs) {
+          const updatedOutputs = {};
+          for (const [key, urls] of Object.entries(rec.outputs)) {
+            updatedOutputs[key] = [];
+            for (const url of urls) {
+              if (fileIdx < entries.length) {
+                updatedOutputs[key].push(`/输出/${encodeURIComponent(displayName)}/${date}/${encodeURIComponent(entries[fileIdx])}`);
+                fileIdx++;
+              } else {
+                updatedOutputs[key].push(url);
+              }
+            }
+          }
+          rec.outputs = updatedOutputs;
+        }
+      }
+    }
+
+    res.json({ records });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
