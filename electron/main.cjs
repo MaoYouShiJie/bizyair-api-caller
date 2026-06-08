@@ -239,10 +239,14 @@ function cleanup() {
   app.quit();
 }
 
+function detectUserDataPath() {
+  if (process.env.PORTABLE_EXECUTABLE_DIR) return path.resolve(process.env.PORTABLE_EXECUTABLE_DIR);
+  if (!app.isPackaged) return path.join(__dirname, '..');
+  return path.dirname(process.execPath);
+}
+
 app.whenReady().then(async () => {
-  const userDataPath = app.isPackaged
-    ? (process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(process.execPath))
-    : path.join(__dirname, '..');
+  const userDataPath = detectUserDataPath();
 
   if (isDev) {
     createWindow();

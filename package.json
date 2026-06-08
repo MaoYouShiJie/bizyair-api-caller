@@ -11,7 +11,7 @@
     "build": "tsc -b && vite build",
     "electron": "set NODE_ENV=production && electron .",
     "electron:prod": "vite build && chcp 65001>nul && set NODE_ENV=production&& electron .",
-    "dist": "vite build && npx electron-builder --win --x64",
+    "dist": "vite build && electron-builder --win --x64",
     "preview": "vite preview"
   },
   "build": {
@@ -20,6 +20,7 @@
     "directories": {
       "output": "release"
     },
+    "asar": true,
     "files": [
       "dist/**/*",
       "electron/**/*",
@@ -27,7 +28,10 @@
       "icon.png"
     ],
     "win": {
-      "target": ["portable", "dir"],
+      "target": [
+        "portable",
+        "dir"
+      ],
       "icon": "icon.png"
     }
   },
@@ -51,6 +55,7 @@
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
     "electron": "^35.1.2",
+    "electron-builder": "^25.1.8",
     "eslint": "^10.3.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",

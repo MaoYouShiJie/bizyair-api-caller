@@ -9,6 +9,9 @@ const PORT = process.env.PORT || 3004;
 const upload = multer({ storage: multer.memoryStorage() });
 
 let dataDir = path.join(__dirname, '..');
+if (dataDir.includes('app.asar')) {
+  try { dataDir = require('electron')?.app?.getPath?.('userData') || path.join(__dirname, '..', '..'); } catch {}
+}
 let configPath = path.join(dataDir, 'config.json');
 let saveDir = '';
 let apiKey = '';
@@ -43,7 +46,6 @@ function startServer(options = {}) {
     if (options.userDataPath) dataDir = options.userDataPath;
     configPath = path.join(dataDir, 'config.json');
     historyPath = path.join(dataDir, 'history.json');
-    if (options.persistDir) persistHistoryPath = path.join(options.persistDir, 'history.json');
     const port = options.port || PORT;
     loadSettings();
     if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir, { recursive: true });
@@ -363,25 +365,10 @@ app.get('/api/thumbnail', async (req, res) => {
 
 // === History routes ===
 let historyPath = path.join(dataDir, 'history.json');
-let persistHistoryPath = path.join(dataDir, 'history.json');
 
 function loadHistory() {
-  const merge = {};
-  // 1) load from seed file (exe root) — user-placed, lower priority
   const seed = loadHistoryFile(historyPath);
-  // 2) load from persistent storage — app-saved, higher priority (overwrites duplicates)
-  const persist = loadHistoryFile(persistHistoryPath);
-  // merge: persist wins on duplicate IDs
-  for (const ep of new Set([...Object.keys(seed), ...Object.keys(persist)])) {
-    const seen = new Set();
-    const merged = [];
-    // seed entries first, then persist entries (persist overwrites same ID)
-    for (const r of [...(seed[ep] || []), ...(persist[ep] || [])]) {
-      if (!seen.has(r.id)) { seen.add(r.id); merged.push(r); }
-    }
-    merge[ep] = merged;
-  }
-  return merge;
+  return seed;
 }
 
 function loadHistoryFile(p) {
@@ -392,7 +379,7 @@ function loadHistoryFile(p) {
 }
 
 function saveHistory(h) {
-  fs.writeFileSync(persistHistoryPath, JSON.stringify(h, null, 2), 'utf8');
+  fs.writeFileSync(historyPath, JSON.stringify(h, null, 2), 'utf8');
 }
 
 app.get('/api/history/:endpoint', (req, res) => {
@@ -402,7 +389,11 @@ app.get('/api/history/:endpoint', (req, res) => {
     const h = loadHistory();
     const records = h[ep] || [];
 
+    // Fix broken OSS URLs: match local files for records that still have HTTP URLs
     if (displayName && saveDir) {
+      const escName = encodeURIComponent(displayName);
+      const namePattern = `^${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}-\\d{2}-\\d{2}-\\d{5}\\.`;
+      const nameRegex = new RegExp(namePattern, 'i');
       const allByDate = {};
       for (const rec of records) {
         const date = rec.timestamp ? rec.timestamp.slice(0, 10) : '';
@@ -411,28 +402,58 @@ app.get('/api/history/:endpoint', (req, res) => {
         allByDate[date].push(rec);
       }
       for (const [date, recs] of Object.entries(allByDate)) {
+        let needsFix = false;
+        for (const rec of recs) {
+          for (const urls of Object.values(rec.outputs)) {
+            for (const url of urls) {
+              if (/^https?:\/\//i.test(url)) { needsFix = true; break; }
+            }
+            if (needsFix) break;
+          }
+          if (needsFix) break;
+        }
+        if (!needsFix) continue;
         const dayDir = path.join(saveDir, displayName, date);
         if (!fs.existsSync(dayDir)) continue;
         const entries = fs.readdirSync(dayDir, { withFileTypes: true })
           .filter(d => d.isFile())
           .map(d => d.name)
-          .filter(f => /\.(png|jpg|jpeg|gif|webp|mp4|webm|mov|avi|mkv|mp3|wav|ogg)$/i.test(f))
-          .sort();
-        let fileIdx = 0;
+          .filter(f => nameRegex.test(f))
+          .sort((a, b) => {
+            const ma = a.match(/-(\d{5})\.[^.]+$/);
+            const mb = b.match(/-(\d{5})\.[^.]+$/);
+            return (ma ? parseInt(ma[1], 10) : 0) - (mb ? parseInt(mb[1], 10) : 0);
+          });
+        if (entries.length === 0) continue;
+        recs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        // Build file-to-counter mapping
+        const fileMap = new Map();
+        for (const f of entries) {
+          const m = f.match(/-(\d{5})\.[^.]+$/);
+          if (m) fileMap.set(parseInt(m[1], 10), f);
+        }
+        // Assign files to records by comparing counter with sequential index
+        let flatIdx = 0;
         for (const rec of recs) {
+          const totalUrls = Object.values(rec.outputs).reduce((s, u) => s + u.length, 0);
+          const expectedStart = flatIdx + 1;
+          let allMatch = true;
+          for (let i = 0; i < totalUrls; i++) {
+            if (!fileMap.has(expectedStart + i)) { allMatch = false; break; }
+          }
+          if (!allMatch) { flatIdx += totalUrls; continue; }
           const updatedOutputs = {};
+          let offset = 0;
           for (const [key, urls] of Object.entries(rec.outputs)) {
             updatedOutputs[key] = [];
-            for (const url of urls) {
-              if (fileIdx < entries.length) {
-                updatedOutputs[key].push(`/输出/${encodeURIComponent(displayName)}/${date}/${encodeURIComponent(entries[fileIdx])}`);
-                fileIdx++;
-              } else {
-                updatedOutputs[key].push(url);
-              }
+            for (let i = 0; i < urls.length; i++) {
+              const counter = flatIdx + 1 + offset + i;
+              updatedOutputs[key].push(`/输出/${escName}/${date}/${encodeURIComponent(fileMap.get(counter))}`);
             }
+            offset += urls.length;
           }
           rec.outputs = updatedOutputs;
+          flatIdx += totalUrls;
         }
       }
     }

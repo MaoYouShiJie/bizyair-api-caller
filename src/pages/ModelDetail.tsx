@@ -570,7 +570,6 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
             }
 
             // 3) If no billing_dim rates, match form values to price_table rows
-            let fromPriceTable = false;
             if (!hasBilling && !priceNum && pt?.cells?.length) {
               // Build map: price_table variable_name → form value (only in-scope fields)
               const varValues: Record<string, string> = {};
@@ -642,31 +641,12 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                 if (score > bestScore) { bestScore = score; bestRow = ri; }
               }
               if (bestRow >= 0) {
-                fromPriceTable = true;
                 const pc = pt.cells[bestRow].find(c => c.variable_name === 'price');
                 if (pc) { priceNum = Number(pc.value_str) || pc.amount; priceUnit = pc.unit_name || '次'; }
               }
             }
 
-            // 4) Multiply price_table result by billing_dim value (only for Step 3, not Step 2)
-            if (priceNum && fromPriceTable) {
-              let dimValue: number | undefined;
-              detail.input_params?.forEach(p => {
-                if (!p.billing_dim) return;
-                const v = formValues[p.field_name];
-                if (v === null || v === undefined) return;
-                const n = Number(v);
-                if (!isNaN(n) && n > 0) {
-                  dimValue = dimValue === undefined ? n : dimValue * n;
-                }
-              });
-              if (dimValue !== undefined) {
-                priceNum = priceNum * dimValue;
-                priceUnit = '';
-              }
-            }
-
-            // 5) Fallback: detail billing_price
+            // 4) Fallback: detail billing_price
             if (!priceNum) {
               priceNum = detail.billing_price ?? detail.billing_price_total;
               priceUnit = detail.billing_unit === 'CALL' ? '次' : '';
