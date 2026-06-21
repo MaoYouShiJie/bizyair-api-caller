@@ -1,6 +1,6 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
-interface MediaItem {
+export interface MediaItem {
   url: string;
   name?: string;
   type?: 'image' | 'video' | 'audio' | 'text';

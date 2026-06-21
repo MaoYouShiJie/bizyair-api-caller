@@ -62,7 +62,7 @@ export default function Home({ onOpenSettings, onOpenAssetLibrary }: { onOpenSet
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState('recently_add');
   const pageSize = 200;
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>();
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => { saveFilter('category', activeCategory); }, [activeCategory]);
   useEffect(() => { saveFilter('tag', activeTag); }, [activeTag]);

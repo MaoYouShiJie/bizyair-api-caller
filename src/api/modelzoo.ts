@@ -1,4 +1,4 @@
-import type { ModelDetail, ModelPrice } from '../types';
+import type { ModelDetail, ModelPrice, TaskResponse } from '../types';
 
 function getApiKey(): string {
   return localStorage.getItem('bizyair_api_key') || '';

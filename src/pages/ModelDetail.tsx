@@ -94,6 +94,58 @@ function InputRenderer({ param, value, onChange }: {
     );
   }
 
+  if (ft === 'number') {
+    const fo = param.field_options || {};
+    const numMin = (fo as any).min;
+    const numMax = (fo as any).max;
+    const numStep = (fo as any).step ?? 1;
+    if (numMin !== undefined && numMax !== undefined && numMax - numMin <= 100 && numStep >= 1) {
+      // small range → slider (existing logic)
+    } else {
+      const nv = value ?? param.field_value;
+      return (
+        <input type="number" className="field-input" min={numMin} max={numMax} step={numStep}
+          value={nv as number ?? ''}
+          onChange={e => { const v = e.target.value === '' ? '' : Number(e.target.value); if (v !== '' && !isNaN(v)) onChange(v); }} />
+      );
+    }
+  }
+
+  if (ft === 'image_size') {
+    const fo = param.field_options || {};
+    const wStep = (fo as any).width_step || 64;
+    const hStep = (fo as any).height_step || 64;
+    const raw = (value as string) || '2048x2048';
+    const sepIdx = raw.search(/[x×]/i);
+    const initW = sepIdx >= 0 ? parseInt(raw.slice(0, sepIdx), 10) || 2048 : 2048;
+    const initH = sepIdx >= 0 ? parseInt(raw.slice(sepIdx + 1), 10) || 2048 : 2048;
+    const [w, setW] = useState(initW);
+    const [h, setH] = useState(initH);
+    const clampW = (v: number) => Math.round(Math.max(64, v) / wStep) * wStep;
+    const clampH = (v: number) => Math.round(Math.max(64, v) / hStep) * hStep;
+    const emit = (nw: number, nh: number) => {
+      onChange(`${nw}\u00D7${nh}`);
+    };
+    useEffect(() => {
+      const sep = raw.search(/[x×]/i);
+      const nw = sep >= 0 ? parseInt(raw.slice(0, sep), 10) || 2048 : 2048;
+      const nh = sep >= 0 ? parseInt(raw.slice(sep + 1), 10) || 2048 : 2048;
+      setW(nw); setH(nh);
+    }, [value]);
+    return (
+      <div className="field-image-size">
+        <input type="number" className="field-input field-size-input"
+          min={64} step={wStep} value={w}
+          onChange={e => { const v = clampW(Number(e.target.value) || 64); setW(v); emit(v, h); }} />
+        <span className="field-size-sep">×</span>
+        <input type="number" className="field-input field-size-input"
+          min={64} step={hStep} value={h}
+          onChange={e => { const v = clampH(Number(e.target.value) || 64); setH(v); emit(w, v); }} />
+        <span className="field-size-pixels">{(w * h).toLocaleString()} 像素</span>
+      </div>
+    );
+  }
+
   if (ft === 'customtext') {
     const taRef = useRef<HTMLTextAreaElement>(null);
     useEffect(() => {
@@ -294,14 +346,14 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
   const [activeTab, setActiveTab] = useState('invoke');
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
-  const [viewerItems, setViewerItems] = useState<{ url: string; name?: string; type?: string }[]>([]);
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [viewerItems, setViewerItems] = useState<import('../components/MediaViewer').MediaItem[]>([]);
+  const [, setSearchParams] = useSearchParams();
   const [historyRecords, setHistoryRecords] = useState<HistoryRecord[]>([]);
   const [resultTab, setResultTab] = useState<'output' | 'history'>('output');
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [historyModal, setHistoryModal] = useState<{ url: string; prompt: string; rec: HistoryRecord; index: number; isVideo: boolean; isAudio: boolean; isText: boolean; list: { url: string; prompt: string; rec: HistoryRecord; isVideo: boolean; isAudio: boolean; isText: boolean }[] } | null>(null);
   const [historyTextContent, setHistoryTextContent] = useState('');
-  const [historyLoading, setHistoryLoading] = useState(false);
+  const [, setHistoryLoading] = useState(false);
   const [historyTextLoading, setHistoryTextLoading] = useState(false);
 
   useEffect(() => {
@@ -686,7 +738,7 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                 endpoint={endpoint}
                 formValues={formValues}
                 onRemove={() => setTaskCardKeys(prev => prev.filter(k => k !== id))}
-                onViewMedia={(items, index) => { setViewerItems(items as { url: string; name?: string; type?: string }[]); setViewerIndex(index); }}
+                onViewMedia={(items, index) => { setViewerItems(items as unknown as import('../components/MediaViewer').MediaItem[]); setViewerIndex(index); }}
               />
             ))}
             {taskCardKeys.length === 0 && (

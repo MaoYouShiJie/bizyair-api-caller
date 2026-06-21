@@ -392,8 +392,6 @@ app.get('/api/history/:endpoint', (req, res) => {
     // Fix broken OSS URLs: match local files for records that still have HTTP URLs
     if (displayName && saveDir) {
       const escName = encodeURIComponent(displayName);
-      const namePattern = `^${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}-\\d{4}-\\d{2}-\\d{2}-\\d{5}\\.`;
-      const nameRegex = new RegExp(namePattern, 'i');
       const allByDate = {};
       for (const rec of records) {
         const date = rec.timestamp ? rec.timestamp.slice(0, 10) : '';
@@ -415,45 +413,27 @@ app.get('/api/history/:endpoint', (req, res) => {
         if (!needsFix) continue;
         const dayDir = path.join(saveDir, displayName, date);
         if (!fs.existsSync(dayDir)) continue;
-        const entries = fs.readdirSync(dayDir, { withFileTypes: true })
+        const allEntries = fs.readdirSync(dayDir, { withFileTypes: true })
           .filter(d => d.isFile())
           .map(d => d.name)
-          .filter(f => nameRegex.test(f))
-          .sort((a, b) => {
-            const ma = a.match(/-(\d{5})\.[^.]+$/);
-            const mb = b.match(/-(\d{5})\.[^.]+$/);
-            return (ma ? parseInt(ma[1], 10) : 0) - (mb ? parseInt(mb[1], 10) : 0);
-          });
-        if (entries.length === 0) continue;
+          .sort((a, b) => fs.statSync(path.join(dayDir, a)).mtimeMs - fs.statSync(path.join(dayDir, b)).mtimeMs);
+        if (allEntries.length === 0) continue;
         recs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        // Build file-to-counter mapping
-        const fileMap = new Map();
-        for (const f of entries) {
-          const m = f.match(/-(\d{5})\.[^.]+$/);
-          if (m) fileMap.set(parseInt(m[1], 10), f);
-        }
-        // Assign files to records by comparing counter with sequential index
-        let flatIdx = 0;
+        // Assign files to records by creation order (handles both named and random files)
+        let fileIdx = 0;
         for (const rec of recs) {
           const totalUrls = Object.values(rec.outputs).reduce((s, u) => s + u.length, 0);
-          const expectedStart = flatIdx + 1;
-          let allMatch = true;
-          for (let i = 0; i < totalUrls; i++) {
-            if (!fileMap.has(expectedStart + i)) { allMatch = false; break; }
-          }
-          if (!allMatch) { flatIdx += totalUrls; continue; }
+          if (fileIdx + totalUrls > allEntries.length) break;
           const updatedOutputs = {};
-          let offset = 0;
           for (const [key, urls] of Object.entries(rec.outputs)) {
             updatedOutputs[key] = [];
             for (let i = 0; i < urls.length; i++) {
-              const counter = flatIdx + 1 + offset + i;
-              updatedOutputs[key].push(`/输出/${escName}/${date}/${encodeURIComponent(fileMap.get(counter))}`);
+              if (fileIdx >= allEntries.length) break;
+              updatedOutputs[key].push(`/输出/${escName}/${date}/${encodeURIComponent(allEntries[fileIdx])}`);
+              fileIdx++;
             }
-            offset += urls.length;
           }
           rec.outputs = updatedOutputs;
-          flatIdx += totalUrls;
         }
       }
     }

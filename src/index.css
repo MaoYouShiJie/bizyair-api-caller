@@ -350,6 +350,10 @@ button { cursor: pointer; font-family: inherit; }
 .field-slider-input { width: 72px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 4px 6px; font-size: 13px; color: var(--text); text-align: center; -moz-appearance: textfield; }
 .field-slider-input::-webkit-outer-spin-button, .field-slider-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .field-slider-input:focus { outline: none; border-color: var(--accent); }
+.field-image-size { display: flex; align-items: center; gap: 8px; }
+.field-size-input { width: 96px; text-align: center; }
+.field-size-sep { font-size: 18px; color: var(--text-secondary); user-select: none; }
+.field-size-pixels { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
 
 .field-seed-wrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .field-seed-input-wrap { position: relative; flex: 1; min-width: 100px; }

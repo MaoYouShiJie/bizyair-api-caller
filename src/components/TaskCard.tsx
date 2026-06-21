@@ -81,7 +81,7 @@ export default function TaskCard({ detail, endpoint, formValues, onRemove, onVie
 
           if (data.status === 'Success') {
             setOutputs(data.outputs || null);
-            setTaskResponse(data as Record<string, unknown>);
+            setTaskResponse(data as unknown as Record<string, unknown>);
 
             const out = data.outputs || {};
             let historyOutputs = out;

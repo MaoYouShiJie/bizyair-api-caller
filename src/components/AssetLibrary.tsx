@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { listFolders, listFiles, deleteFile, downloadFile, pickSaveDir, getSavePath, hasSaveDir } from '../api/assetLibrary';
+import { listFolders, listFiles, deleteFile, pickSaveDir, getSavePath, hasSaveDir } from '../api/assetLibrary';
 import MediaViewer from './MediaViewer';
 import type { AssetFolder, AssetFile } from '../api/assetLibrary';
 
