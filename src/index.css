@@ -464,6 +464,10 @@ button { cursor: pointer; font-family: inherit; }
 .benefit-row-val { font-weight: 700; color: var(--text); }
 .text-muted { color: var(--text-muted); }
 .price-simple-text { font-size: 14px; color: var(--text); line-height: 1.6; background: var(--bg); padding: 12px 16px; border-radius: var(--radius-xs); }
+.price-additional { margin-top: 16px; font-size: 14px; line-height: 1.8; }
+.price-additional table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+.price-additional th, .price-additional td { padding: 6px 12px; border: 1px solid var(--border); text-align: left; }
+.price-additional th { background: var(--bg-card); font-weight: 600; }
 .btn-label { display: flex; align-items: center; justify-content: center; gap: 6px; }
 
 /* Result Panel Tabs */

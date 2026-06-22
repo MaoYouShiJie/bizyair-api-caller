@@ -21,7 +21,7 @@ function jsonForDisplay(taskResponse: Record<string, unknown> | null, outputs: R
   return { request_id: '', status: 'Success', message: null, outputs: out };
 }
 
-function mdToHtml(text: string) {
+export function mdToHtml(text: string) {
   const lines = text.split('\n');
   let html = '';
   let inList = false;

@@ -54,6 +54,7 @@ export interface PriceTableData {
   columns: PriceTableColumn[];
   cells?: PriceTableCellValue[][];
   simple_price_text?: string;
+  additional_table?: string;
 }
 
 export interface BenefitInfo {

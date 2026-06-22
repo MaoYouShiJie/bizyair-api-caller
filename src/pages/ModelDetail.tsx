@@ -4,7 +4,7 @@ import { fetchModelDetail, fetchModelPrice } from '../api/modelzoo';
 
 import { loadHistory, deleteHistory, type HistoryRecord } from '../api/history';
 import MediaViewer from '../components/MediaViewer';
-import TaskCard from '../components/TaskCard';
+import TaskCard, { mdToHtml } from '../components/TaskCard';
 import type { ModelDetail, InputParam, ModelPrice } from '../types';
 const zhCategory: Record<string, string> = {
   'Text to Image': '文生图', 'Image to Image': '图生图',
@@ -558,6 +558,9 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
                 </table>
               ) : modelPrice.price_table.simple_price_text ? (
                 <p className="price-simple-text">{modelPrice.price_table.simple_price_text}</p>
+              ) : null}
+              {modelPrice.price_table.additional_table ? (
+                <div className="price-additional" dangerouslySetInnerHTML={{ __html: mdToHtml(modelPrice.price_table.additional_table) }} />
               ) : null}
             </div>
           )}
