@@ -3,7 +3,10 @@ dist/
 release/
 .thumbcache/
 .playwright-mcp/
+.codebuddy/
 history.json
 config.json
 输出/
 测试/
+electron-builder-override.json
+快速启动.bat

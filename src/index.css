@@ -354,6 +354,7 @@ button { cursor: pointer; font-family: inherit; }
 .field-size-input { width: 96px; text-align: center; }
 .field-size-sep { font-size: 18px; color: var(--text-secondary); user-select: none; }
 .field-size-pixels { font-size: 13px; color: var(--text-secondary); white-space: nowrap; }
+.field-size-warn { color: #e74c3c; font-weight: 600; }
 
 .field-seed-wrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .field-seed-input-wrap { position: relative; flex: 1; min-width: 100px; }

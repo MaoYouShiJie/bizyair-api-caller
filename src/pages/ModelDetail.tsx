@@ -115,33 +115,59 @@ function InputRenderer({ param, value, onChange }: {
     const fo = param.field_options || {};
     const wStep = (fo as any).width_step || 64;
     const hStep = (fo as any).height_step || 64;
+    const minPx = (fo as any).min_pixels || 1;
+    const maxPx = (fo as any).max_pixels || 999999999;
     const raw = (value as string) || '2048x2048';
     const sepIdx = raw.search(/[x×]/i);
     const initW = sepIdx >= 0 ? parseInt(raw.slice(0, sepIdx), 10) || 2048 : 2048;
     const initH = sepIdx >= 0 ? parseInt(raw.slice(sepIdx + 1), 10) || 2048 : 2048;
-    const [w, setW] = useState(initW);
-    const [h, setH] = useState(initH);
+    const [w, setW] = useState(String(initW));
+    const [h, setH] = useState(String(initH));
+    const nw = Number(w) || 0;
+    const nh = Number(h) || 0;
+    const pixels = nw * nh;
+    const belowMin = pixels > 0 && pixels < minPx;
+    const aboveMax = pixels > maxPx;
     const clampW = (v: number) => Math.round(Math.max(64, v) / wStep) * wStep;
     const clampH = (v: number) => Math.round(Math.max(64, v) / hStep) * hStep;
-    const emit = (nw: number, nh: number) => {
+    const commit = () => {
+      let nw = clampW(Number(w) || 2048);
+      let nh = clampH(Number(h) || 2048);
+      if (nw * nh < minPx) {
+        const ratio = nw / nh;
+        nw = Math.ceil(Math.sqrt(minPx * ratio));
+        nh = Math.ceil(Math.sqrt(minPx / ratio));
+        nw = clampW(nw); nh = clampH(nh);
+        if (nw * nh < minPx) { nw += wStep; nh += hStep; }
+      }
+      if (nw * nh > maxPx) {
+        nw = Math.floor(Math.sqrt(maxPx));
+        nh = Math.floor(Math.sqrt(maxPx));
+        nw = clampW(nw); nh = clampH(nh);
+      }
+      setW(String(nw)); setH(String(nh));
       onChange(`${nw}\u00D7${nh}`);
     };
     useEffect(() => {
       const sep = raw.search(/[x×]/i);
       const nw = sep >= 0 ? parseInt(raw.slice(0, sep), 10) || 2048 : 2048;
       const nh = sep >= 0 ? parseInt(raw.slice(sep + 1), 10) || 2048 : 2048;
-      setW(nw); setH(nh);
+      setW(String(nw)); setH(String(nh));
     }, [value]);
     return (
       <div className="field-image-size">
         <input type="number" className="field-input field-size-input"
           min={64} step={wStep} value={w}
-          onChange={e => { const v = clampW(Number(e.target.value) || 64); setW(v); emit(v, h); }} />
+          onChange={e => setW(e.target.value)}
+          onBlur={commit} />
         <span className="field-size-sep">×</span>
         <input type="number" className="field-input field-size-input"
           min={64} step={hStep} value={h}
-          onChange={e => { const v = clampH(Number(e.target.value) || 64); setH(v); emit(w, v); }} />
-        <span className="field-size-pixels">{(w * h).toLocaleString()} 像素</span>
+          onChange={e => setH(e.target.value)}
+          onBlur={commit} />
+        <span className={`field-size-pixels ${belowMin || aboveMax ? 'field-size-warn' : ''}`}>
+          {pixels.toLocaleString()} / {minPx.toLocaleString()} 像素{belowMin ? ' (不足)' : aboveMax ? ' (超限)' : ''}
+        </span>
       </div>
     );
   }
