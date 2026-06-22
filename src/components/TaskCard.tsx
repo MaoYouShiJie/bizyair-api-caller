@@ -25,11 +25,39 @@ export function mdToHtml(text: string) {
   const lines = text.split('\n');
   let html = '';
   let inList = false;
-  for (const raw of lines) {
+
+  function tableFromRows(rows: string[]) {
+    const cells = rows.map(r => r.split('|').map(c => c.trim()).filter(c => c));
+    const separatorIdx = cells.findIndex(row => row.every(c => /^-+\s*$/.test(c)));
+    const header = separatorIdx >= 0 ? cells[0] : null;
+    const bodyRows = separatorIdx >= 0 ? cells.slice(separatorIdx + 1) : cells;
+    let t = '<table>';
+    if (header) t += '<thead><tr>' + header.map(c => `<th>${c}</th>`).join('') + '</tr></thead>';
+    t += '<tbody>';
+    for (const row of bodyRows) {
+      t += '<tr>' + row.map(c => `<td>${c}</td>`).join('') + '</tr>';
+    }
+    t += '</tbody></table>';
+    return t;
+  }
+
+  let i = 0;
+  while (i < lines.length) {
+    const raw = lines[i];
     let line = raw
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+    if (/^\|/.test(raw.trim())) {
+      const tableRows: string[] = [];
+      while (i < lines.length && /^\|/.test(lines[i].trim())) {
+        tableRows.push(lines[i].trim());
+        i++;
+      }
+      if (inList) { html += '</ul>'; inList = false; }
+      html += tableFromRows(tableRows);
+      continue;
+    }
     if (/^###\s+(.*)/.test(line)) {
       if (inList) { html += '</ul>'; inList = false; }
       html += `<h3>${line.replace(/^###\s+/, '')}</h3>`;
@@ -45,6 +73,7 @@ export function mdToHtml(text: string) {
       if (inList) { html += '</ul>'; inList = false; }
       html += `<p>${line}</p>`;
     }
+    i++;
   }
   if (inList) html += '</ul>';
   return html;
