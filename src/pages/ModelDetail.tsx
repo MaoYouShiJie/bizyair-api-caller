@@ -113,8 +113,8 @@ function InputRenderer({ param, value, onChange }: {
 
   if (ft === 'image_size') {
     const fo = param.field_options || {};
-    const wStep = (fo as any).width_step || 64;
-    const hStep = (fo as any).height_step || 64;
+    const wStep = (fo as any).width_step || 1;
+    const hStep = (fo as any).height_step || 1;
     const minPx = (fo as any).min_pixels || 1;
     const maxPx = (fo as any).max_pixels || 999999999;
     const raw = (value as string) || '2048x2048';
@@ -730,9 +730,25 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
               priceUnit = detail.billing_unit === 'CALL' ? '次' : '';
             }
 
+            let sizeDisabled = false;
+            if (detail?.input_params) {
+              for (const p of detail.input_params) {
+                if (p.field_type === 'image_size') {
+                  const v = String(formValues[p.field_name] || '');
+                  const m = v.match(/(\d+)\s*[x×]\s*(\d+)/);
+                  if (m) {
+                    const w = parseInt(m[1], 10), h = parseInt(m[2], 10);
+                    const fo: any = p.field_options || {};
+                    const minPx = fo.min_pixels || 0;
+                    if (w * h < minPx) sizeDisabled = true;
+                  }
+                }
+              }
+            }
+
             return (
               <div className="btn-row">
-                <button className="btn btn-primary btn-submit" onClick={handleSubmit}>
+                <button className="btn btn-primary btn-submit" onClick={handleSubmit} disabled={sizeDisabled}>
                   <span className="btn-label">
                     运行
                     {priceNum !== undefined && priceNum > 0 ? <span className="btn-price"> 🟡 {priceNum}{priceUnit ? `/${priceUnit}` : ''}</span> : pt?.simple_price_text ? <span className="btn-price"> 🟡 按量计费</span> : <span className="btn-price"> 🟡 ?</span>}
