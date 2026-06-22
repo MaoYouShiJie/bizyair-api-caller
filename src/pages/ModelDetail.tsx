@@ -729,36 +729,58 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
 
             // 4) Parse additional_table for mode×rate pricing (e.g. Ideogram-4)
             if (!priceNum && pt?.additional_table) {
-              const tableLines = pt.additional_table.split('\n').filter(l => /^\|.+\|.+/.test(l.trim()) && !/^\|[- ]+\|/.test(l));
-              const modeRates: { mode: string; rate: number }[] = [];
-              for (const l of tableLines) {
-                const parts = l.split('|').map(s => s.trim()).filter(Boolean);
-                if (parts.length >= 2) {
-                  const rate = parseFloat(parts[1].replace(/[^\d.]/g, ''));
-                  if (!isNaN(rate)) modeRates.push({ mode: parts[0], rate });
+              try {
+                const raw = typeof pt.additional_table === 'string' ? pt.additional_table : String(pt.additional_table || '');
+                const tableLines = raw.split('\n').filter(l => /^\|.+\|.+/.test(l.trim()) && !/^\|[- ]+\|/.test(l));
+                const modeRates: { mode: string; rate: number }[] = [];
+                for (const l of tableLines) {
+                  const parts = l.split('|').map(s => s.trim()).filter(Boolean);
+                  if (parts.length >= 2) {
+                    const rate = parseFloat(parts[1].replace(/[^\d.]/g, ''));
+                    if (!isNaN(rate)) modeRates.push({ mode: parts[0], rate });
+                  }
                 }
-              }
-              if (modeRates.length) {
-                let multiplier: number | undefined;
-                let currentMode: string | undefined;
-                detail.input_params?.forEach(p => {
-                  const v = formValues[p.field_name];
-                  if (v === null || v === undefined) return;
-                  if (p.field_type === 'number' && !p.billing_dim) {
+                if (modeRates.length) {
+                  let multiplier: number | undefined;
+                  let currentMode: string | undefined;
+                  // Find multiplier: prefer a number field whose label/name suggests pixel count or size
+                  for (const p of detail.input_params || []) {
+                    if (p.field_type !== 'number') continue;
+                    const label = (p.field_label || p.field_name || '').toLowerCase();
+                    const isMultiplier = /^(megapixel|百万像素|像素|mp|resolution|尺寸|size)/i.test(label) || p.field_name === 'megapixels' || p.field_name === 'num_inference_steps';
+                    if (!isMultiplier) continue;
+                    const v = formValues[p.field_name];
+                    if (v === null || v === undefined) continue;
                     const n = Number(v);
-                    if (!isNaN(n) && n > 0) multiplier = n;
+                    if (!isNaN(n) && n > 0) { multiplier = n; break; }
                   }
-                  if (p.field_type === 'combo' && p.field_label.includes('模式')) {
-                    currentMode = String(v);
+                  // Fallback: use any number field (including billing_dim)
+                  if (!multiplier) {
+                    for (const p of detail.input_params || []) {
+                      if (p.field_type !== 'number') continue;
+                      const v = formValues[p.field_name];
+                      if (v === null || v === undefined) continue;
+                      const n = Number(v);
+                      if (!isNaN(n) && n > 0) { multiplier = n; break; }
+                    }
                   }
-                });
-                if (multiplier && currentMode) {
-                  const matched = modeRates.find(r => r.mode === currentMode);
-                  if (matched) { priceNum = multiplier * matched.rate; priceUnit = ''; }
-                } else if (multiplier) {
-                  priceNum = multiplier * modeRates[0].rate;
-                  priceUnit = '';
+                  detail.input_params?.forEach(p => {
+                    const v = formValues[p.field_name];
+                    if (v === null || v === undefined) return;
+                    if ((p.field_type === 'combo' && p.field_label.includes('模式')) || p.field_label.includes('quality') || p.field_label.includes('Mode')) {
+                      currentMode = String(v);
+                    }
+                  });
+                  if (multiplier && currentMode) {
+                    const matched = modeRates.find(r => r.mode === currentMode);
+                    if (matched) { priceNum = multiplier * matched.rate; priceUnit = ''; }
+                  } else if (multiplier) {
+                    priceNum = multiplier * modeRates[0].rate;
+                    priceUnit = '';
+                  }
                 }
+              } catch (e) {
+                console.error('Price calc error:', e);
               }
             }
 
@@ -784,12 +806,19 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
               }
             }
 
+            const priceLabel = priceNum !== undefined && priceNum > 0
+              ? `🟡 ${priceNum}${priceUnit ? `/${priceUnit}` : ''}`
+              : pt?.simple_price_text
+                ? `🟡 按量计费`
+                : `🟡 ?`;
+
             return (
               <div className="btn-row">
-                <button className="btn btn-primary btn-submit" onClick={handleSubmit} disabled={sizeDisabled}>
+                <button className="btn btn-primary btn-submit" onClick={handleSubmit} disabled={sizeDisabled}
+                  title={`priceNum=${priceNum} hasPriceTable=${!!pt} hasSimplePrice=${!!pt?.simple_price_text} hasAdditionalTable=${!!pt?.additional_table} fv=${JSON.stringify(formValues)}`}>
                   <span className="btn-label">
                     运行
-                    {priceNum !== undefined && priceNum > 0 ? <span className="btn-price"> 🟡 {priceNum}{priceUnit ? `/${priceUnit}` : ''}</span> : pt?.simple_price_text ? <span className="btn-price"> 🟡 按量计费</span> : <span className="btn-price"> 🟡 ?</span>}
+                    <span className="btn-price">{priceLabel}</span>
                   </span>
                 </button>
                 <button className="btn btn-ghost btn-reset" onClick={() => defaultValues && setFormValues({ ...defaultValues })}>
