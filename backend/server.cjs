@@ -152,14 +152,18 @@ async function downloadOutputs(outputs, appName) {
     if (!Array.isArray(urls)) continue;
     localOutputs[mimeKey] = [];
     for (const url of urls) {
+      // Already a local path → pass through unchanged
+      if (!/^https?:\/\//i.test(url) && !url.startsWith('data:')) {
+        localOutputs[mimeKey].push(url);
+        continue;
+      }
+
       counter++;
       const isVideo = mimeKey.includes('video');
       const isAudio = mimeKey.includes('audio');
-      const isText = !url.startsWith('data:') && !/^https?:\/\//i.test(url);
       let ext = '.png';
       if (isVideo) ext = '.mp4';
       else if (isAudio) ext = '.mp3';
-      else if (isText) ext = '.txt';
       else {
         const u = url.split('?')[0];
         const m = u.match(/\.(\w+)$/);
@@ -173,12 +177,10 @@ async function downloadOutputs(outputs, appName) {
         let buffer;
         if (url.startsWith('data:')) {
           buffer = Buffer.from(url.split(',')[1], 'base64');
-        } else if (/^https?:\/\//i.test(url)) {
+        } else {
           const resp = await fetch(url);
           if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
           buffer = Buffer.from(await resp.arrayBuffer());
-        } else {
-          buffer = Buffer.from(url);
         }
         if (!buffer || buffer.length === 0) continue;
         fs.writeFileSync(fp, buffer);
@@ -430,11 +432,16 @@ app.post('/api/history/:endpoint', async (req, res) => {
 
     let savedOutputs = outputs || {};
     if (display_name && outputs && Object.keys(outputs).length) {
-      try {
-        const dl = await downloadOutputs(outputs, display_name);
-        if (dl.saved > 0) savedOutputs = dl.localOutputs;
-      } catch (e) {
-        console.error('History save-outputs download failed:', e.message);
+      const hasRemote = Object.values(outputs).some((urls) =>
+        Array.isArray(urls) && urls.some((u) => /^https?:\/\//i.test(u))
+      );
+      if (hasRemote) {
+        try {
+          const dl = await downloadOutputs(outputs, display_name);
+          if (dl.saved > 0) savedOutputs = dl.localOutputs;
+        } catch (e) {
+          console.error('History save-outputs download failed:', e.message);
+        }
       }
     }
 
