@@ -129,78 +129,82 @@ app.put('/api/config/api-key', (req, res) => {
   res.json({ success: true });
 });
 
+async function downloadOutputs(outputs, appName) {
+  const today = new Date().toISOString().split('T')[0];
+  const name = appName || '未知应用';
+  const baseDir = path.join(saveDir, name, today);
+  if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
+
+  let maxCounter = 0;
+  try {
+    const existing = fs.readdirSync(baseDir);
+    for (const f of existing) {
+      const m = f.match(/-(\d{5})\.[^.]+$/);
+      if (m) maxCounter = Math.max(maxCounter, parseInt(m[1], 10));
+    }
+  } catch {}
+
+  const results = [];
+  let counter = maxCounter;
+  const localOutputs = {};
+
+  for (const [mimeKey, urls] of Object.entries(outputs)) {
+    if (!Array.isArray(urls)) continue;
+    localOutputs[mimeKey] = [];
+    for (const url of urls) {
+      counter++;
+      const isVideo = mimeKey.includes('video');
+      const isAudio = mimeKey.includes('audio');
+      const isText = !url.startsWith('data:') && !/^https?:\/\//i.test(url);
+      let ext = '.png';
+      if (isVideo) ext = '.mp4';
+      else if (isAudio) ext = '.mp3';
+      else if (isText) ext = '.txt';
+      else {
+        const u = url.split('?')[0];
+        const m = u.match(/\.(\w+)$/);
+        if (m) ext = '.' + m[1];
+      }
+
+      const fileName = `${name}-${today}-${String(counter).padStart(5, '0')}${ext}`;
+      const fp = path.join(baseDir, fileName);
+
+      try {
+        let buffer;
+        if (url.startsWith('data:')) {
+          buffer = Buffer.from(url.split(',')[1], 'base64');
+        } else if (/^https?:\/\//i.test(url)) {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          buffer = Buffer.from(await resp.arrayBuffer());
+        } else {
+          buffer = Buffer.from(url);
+        }
+        if (!buffer || buffer.length === 0) continue;
+        fs.writeFileSync(fp, buffer);
+        const localUrl = `/输出/${encodeURIComponent(name)}/${today}/${encodeURIComponent(fileName)}`;
+        results.push({ success: true, fileName, filePath: fp, url: localUrl });
+        localOutputs[mimeKey].push(localUrl);
+      } catch (e) {
+        results.push({ success: false, error: e.message, url });
+        localOutputs[mimeKey].push(url);
+      }
+    }
+  }
+
+  return {
+    saved: results.filter(r => r.success).length,
+    results,
+    localOutputs,
+  };
+}
+
 app.post('/api/save-outputs', async (req, res) => {
   try {
     const { outputs, app_name } = req.body;
     if (!outputs) return res.status(400).json({ error: 'outputs required' });
-
-    const today = new Date().toISOString().split('T')[0];
-    const appName = app_name || '未知应用';
-    const baseDir = path.join(saveDir, appName, today);
-    if (!fs.existsSync(baseDir)) fs.mkdirSync(baseDir, { recursive: true });
-
-    let maxCounter = 0;
-    try {
-      const existing = fs.readdirSync(baseDir);
-      for (const f of existing) {
-        const m = f.match(/-(\d{5})\.[^.]+$/);
-        if (m) maxCounter = Math.max(maxCounter, parseInt(m[1], 10));
-      }
-    } catch {}
-
-    const results = [];
-    let counter = maxCounter;
-
-    for (const [mimeKey, urls] of Object.entries(outputs)) {
-      if (!Array.isArray(urls)) continue;
-      for (const url of urls) {
-        counter++;
-        const isVideo = mimeKey.includes('video');
-        const isAudio = mimeKey.includes('audio');
-        const isText = !url.startsWith('data:') && !/^https?:\/\//i.test(url);
-        let ext = '.png';
-        if (isVideo) ext = '.mp4';
-        else if (isAudio) ext = '.mp3';
-        else if (isText) ext = '.txt';
-        else {
-          const u = url.split('?')[0];
-          const m = u.match(/\.(\w+)$/);
-          if (m) ext = '.' + m[1];
-        }
-
-        const fileName = `${appName}-${today}-${String(counter).padStart(5, '0')}${ext}`;
-        const fp = path.join(baseDir, fileName);
-
-        try {
-          let buffer;
-          if (url.startsWith('data:')) {
-            buffer = Buffer.from(url.split(',')[1], 'base64');
-          } else if (/^https?:\/\//i.test(url)) {
-            const resp = await fetch(url);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-            buffer = Buffer.from(await resp.arrayBuffer());
-          } else {
-            buffer = Buffer.from(url);
-          }
-          if (!buffer || buffer.length === 0) continue;
-          fs.writeFileSync(fp, buffer);
-          results.push({
-            success: true,
-            fileName,
-            filePath: fp,
-            url: `/输出/${encodeURIComponent(appName)}/${today}/${encodeURIComponent(fileName)}`,
-          });
-        } catch (e) {
-          results.push({ success: false, error: e.message, url });
-        }
-      }
-    }
-
-    res.json({
-      success: true,
-      saved: results.filter(r => r.success).length,
-      results,
-    });
+    const result = await downloadOutputs(outputs, app_name);
+    res.json({ success: true, saved: result.saved, results: result.results });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -382,60 +386,34 @@ function saveHistory(h) {
   fs.writeFileSync(historyPath, JSON.stringify(h, null, 2), 'utf8');
 }
 
-app.get('/api/history/:endpoint', (req, res) => {
+app.get('/api/history/:endpoint', async (req, res) => {
   try {
     const ep = req.params.endpoint;
     const displayName = req.query.display_name;
     const h = loadHistory();
     const records = h[ep] || [];
 
-    // Fix broken OSS URLs: match local files for records that still have HTTP URLs
+    // Fix broken OSS URLs: download remote files and store locally, then fix history.json
     if (displayName && saveDir) {
-      const escName = encodeURIComponent(displayName);
-      const allByDate = {};
+      let hasChanges = false;
       for (const rec of records) {
         const date = rec.timestamp ? rec.timestamp.slice(0, 10) : '';
         if (!date) continue;
-        if (!allByDate[date]) allByDate[date] = [];
-        allByDate[date].push(rec);
-      }
-      for (const [date, recs] of Object.entries(allByDate)) {
-        let needsFix = false;
-        for (const rec of recs) {
-          for (const urls of Object.values(rec.outputs)) {
-            for (const url of urls) {
-              if (/^https?:\/\//i.test(url)) { needsFix = true; break; }
-            }
-            if (needsFix) break;
-          }
-          if (needsFix) break;
-        }
+        const needsFix = Object.values(rec.outputs).some(urls =>
+          Array.isArray(urls) && urls.some(u => /^https?:\/\//i.test(u))
+        );
         if (!needsFix) continue;
-        const dayDir = path.join(saveDir, displayName, date);
-        if (!fs.existsSync(dayDir)) continue;
-        const allEntries = fs.readdirSync(dayDir, { withFileTypes: true })
-          .filter(d => d.isFile())
-          .map(d => d.name)
-          .sort((a, b) => fs.statSync(path.join(dayDir, a)).mtimeMs - fs.statSync(path.join(dayDir, b)).mtimeMs);
-        if (allEntries.length === 0) continue;
-        recs.sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
-        // Assign files to records by creation order (handles both named and random files)
-        let fileIdx = 0;
-        for (const rec of recs) {
-          const totalUrls = Object.values(rec.outputs).reduce((s, u) => s + u.length, 0);
-          if (fileIdx + totalUrls > allEntries.length) break;
-          const updatedOutputs = {};
-          for (const [key, urls] of Object.entries(rec.outputs)) {
-            updatedOutputs[key] = [];
-            for (let i = 0; i < urls.length; i++) {
-              if (fileIdx >= allEntries.length) break;
-              updatedOutputs[key].push(`/输出/${escName}/${date}/${encodeURIComponent(allEntries[fileIdx])}`);
-              fileIdx++;
-            }
+        try {
+          const dl = await downloadOutputs(rec.outputs, displayName);
+          if (dl.saved > 0) {
+            rec.outputs = dl.localOutputs;
+            hasChanges = true;
           }
-          rec.outputs = updatedOutputs;
+        } catch (e) {
+          console.error('History fix download failed:', e.message);
         }
       }
+      if (hasChanges) saveHistory(h);
     }
 
     res.json({ records });
@@ -444,17 +422,28 @@ app.get('/api/history/:endpoint', (req, res) => {
   }
 });
 
-app.post('/api/history/:endpoint', (req, res) => {
+app.post('/api/history/:endpoint', async (req, res) => {
   try {
     const ep = req.params.endpoint;
-    const { formValues, outputs, taskId } = req.body;
+    const { formValues, outputs, taskId, display_name } = req.body;
     if (!formValues) return res.status(400).json({ error: 'formValues required' });
+
+    let savedOutputs = outputs || {};
+    if (display_name && outputs && Object.keys(outputs).length) {
+      try {
+        const dl = await downloadOutputs(outputs, display_name);
+        if (dl.saved > 0) savedOutputs = dl.localOutputs;
+      } catch (e) {
+        console.error('History save-outputs download failed:', e.message);
+      }
+    }
+
     const h = loadHistory();
     if (!h[ep]) h[ep] = [];
     h[ep].unshift({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       formValues,
-      outputs: outputs || {},
+      outputs: savedOutputs,
       taskId: taskId || '',
       timestamp: new Date().toISOString(),
     });
