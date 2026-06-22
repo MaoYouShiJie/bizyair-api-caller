@@ -727,7 +727,42 @@ export default function ModelDetailPage({ onOpenSettings, onOpenAssetLibrary }: 
               }
             }
 
-            // 4) Fallback: detail billing_price
+            // 4) Parse additional_table for mode×rate pricing (e.g. Ideogram-4)
+            if (!priceNum && pt?.additional_table) {
+              const tableLines = pt.additional_table.split('\n').filter(l => /^\|.+\|.+/.test(l.trim()) && !/^\|[- ]+\|/.test(l));
+              const modeRates: { mode: string; rate: number }[] = [];
+              for (const l of tableLines) {
+                const parts = l.split('|').map(s => s.trim()).filter(Boolean);
+                if (parts.length >= 2) {
+                  const rate = parseFloat(parts[1].replace(/[^\d.]/g, ''));
+                  if (!isNaN(rate)) modeRates.push({ mode: parts[0], rate });
+                }
+              }
+              if (modeRates.length) {
+                let multiplier: number | undefined;
+                let currentMode: string | undefined;
+                detail.input_params?.forEach(p => {
+                  const v = formValues[p.field_name];
+                  if (v === null || v === undefined) return;
+                  if (p.field_type === 'number' && !p.billing_dim) {
+                    const n = Number(v);
+                    if (!isNaN(n) && n > 0) multiplier = n;
+                  }
+                  if (p.field_type === 'combo' && p.field_label.includes('模式')) {
+                    currentMode = String(v);
+                  }
+                });
+                if (multiplier && currentMode) {
+                  const matched = modeRates.find(r => r.mode === currentMode);
+                  if (matched) { priceNum = multiplier * matched.rate; priceUnit = ''; }
+                } else if (multiplier) {
+                  priceNum = multiplier * modeRates[0].rate;
+                  priceUnit = '';
+                }
+              }
+            }
+
+            // 5) Fallback: detail billing_price
             if (!priceNum) {
               priceNum = detail.billing_price ?? detail.billing_price_total;
               priceUnit = detail.billing_unit === 'CALL' ? '次' : '';
