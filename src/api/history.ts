@@ -24,10 +24,10 @@ export async function loadHistory(endpoint: string, displayName?: string): Promi
   return data.records || [];
 }
 
-export async function saveHistory(endpoint: string, formValues: Record<string, unknown>, outputs: Record<string, string[]>, taskId: string, displayName?: string): Promise<void> {
+export async function saveHistory(endpoint: string, formValues: Record<string, unknown>, outputs: Record<string, string[]>, taskId: string): Promise<void> {
   await api(`/api/history/${encodeURIComponent(endpoint)}`, {
     method: 'POST',
-    body: JSON.stringify({ formValues, outputs, taskId, display_name: displayName }),
+    body: JSON.stringify({ formValues, outputs, taskId }),
   });
 }
 

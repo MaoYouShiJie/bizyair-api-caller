@@ -126,7 +126,7 @@ export default function TaskCard({ detail, endpoint, formValues, onRemove, onVie
                 if (!cancelledRef.current) setSaveStatus('保存失败');
               }
             }
-            saveHistory(endpoint, formValues, historyOutputs, tid, detail.display_name).catch(() => {});
+            saveHistory(endpoint, formValues, historyOutputs, tid).catch(() => {});
             break;
           }
           if (data.status === 'Failed') {

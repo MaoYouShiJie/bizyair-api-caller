@@ -129,6 +129,10 @@ app.put('/api/config/api-key', (req, res) => {
   res.json({ success: true });
 });
 
+function needsDownload(url) {
+  return /^https?:\/\//i.test(url) || url.startsWith('data:');
+}
+
 async function downloadOutputs(outputs, appName) {
   const today = new Date().toISOString().split('T')[0];
   const name = appName || '未知应用';
@@ -152,8 +156,8 @@ async function downloadOutputs(outputs, appName) {
     if (!Array.isArray(urls)) continue;
     localOutputs[mimeKey] = [];
     for (const url of urls) {
-      // Already a local path → pass through unchanged
-      if (!/^https?:\/\//i.test(url) && !url.startsWith('data:')) {
+      if (!needsDownload(url)) {
+        results.push({ success: true, url });
         localOutputs[mimeKey].push(url);
         continue;
       }
@@ -388,69 +392,28 @@ function saveHistory(h) {
   fs.writeFileSync(historyPath, JSON.stringify(h, null, 2), 'utf8');
 }
 
-app.get('/api/history/:endpoint', async (req, res) => {
+app.get('/api/history/:endpoint', (req, res) => {
   try {
     const ep = req.params.endpoint;
-    const displayName = req.query.display_name;
     const h = loadHistory();
     const records = h[ep] || [];
-
-    // Fix broken OSS URLs: download remote files and store locally, then fix history.json
-    if (displayName && saveDir) {
-      let hasChanges = false;
-      for (const rec of records) {
-        const date = rec.timestamp ? rec.timestamp.slice(0, 10) : '';
-        if (!date) continue;
-        const needsFix = Object.values(rec.outputs).some(urls =>
-          Array.isArray(urls) && urls.some(u => /^https?:\/\//i.test(u))
-        );
-        if (!needsFix) continue;
-        try {
-          const dl = await downloadOutputs(rec.outputs, displayName);
-          if (dl.saved > 0) {
-            rec.outputs = dl.localOutputs;
-            hasChanges = true;
-          }
-        } catch (e) {
-          console.error('History fix download failed:', e.message);
-        }
-      }
-      if (hasChanges) saveHistory(h);
-    }
-
     res.json({ records });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-app.post('/api/history/:endpoint', async (req, res) => {
+app.post('/api/history/:endpoint', (req, res) => {
   try {
     const ep = req.params.endpoint;
-    const { formValues, outputs, taskId, display_name } = req.body;
+    const { formValues, outputs, taskId } = req.body;
     if (!formValues) return res.status(400).json({ error: 'formValues required' });
-
-    let savedOutputs = outputs || {};
-    if (display_name && outputs && Object.keys(outputs).length) {
-      const hasRemote = Object.values(outputs).some((urls) =>
-        Array.isArray(urls) && urls.some((u) => /^https?:\/\//i.test(u))
-      );
-      if (hasRemote) {
-        try {
-          const dl = await downloadOutputs(outputs, display_name);
-          if (dl.saved > 0) savedOutputs = dl.localOutputs;
-        } catch (e) {
-          console.error('History save-outputs download failed:', e.message);
-        }
-      }
-    }
-
     const h = loadHistory();
     if (!h[ep]) h[ep] = [];
     h[ep].unshift({
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       formValues,
-      outputs: savedOutputs,
+      outputs: outputs || {},
       taskId: taskId || '',
       timestamp: new Date().toISOString(),
     });
